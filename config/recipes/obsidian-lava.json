@@ -1,0 +1,40 @@
+{
+  "id": "obsidian-lava",
+  "title": "OBSIDIAN vs 1,000 CUTS",
+  "subtitle": "PRECISION CUTTING LAB",
+  "seed": 1337,
+  "object": {
+    "type": "procedural",
+    "shape": "block",
+    "size": [1.5, 0.95, 1.5],
+    "roughness": 0.34,
+    "relief": 1.0,
+    "glb": { "url": "/models/object.glb", "scale": 1, "rotation": [0, 0, 0] }
+  },
+  "palette": {
+    "shell": "#1b1a22",
+    "inner": "#3a2a2e",
+    "core": "#ff5a14",
+    "accent": "#ff8a3c",
+    "crumb": "#2a2630",
+    "magma": "#ff6a1f",
+    "gold": "#ffe14d",
+    "table": "#0e0f13",
+    "background": "#050609"
+  },
+  "timing": { "hook": 1.8, "drop": 0.25, "pre": 0.15, "settle": 0.55, "sweep": 0.55, "tail": 0.5, "rotate": 0.4, "gap": 0.9 },
+  "rounds": [
+    { "cuts": 10,   "tool": "STEEL",          "mode": "slice", "duration": 6.6, "accel": 1.5, "cubeSize": 0.25,  "zoom": 0.95 },
+    { "cuts": 50,   "tool": "1000°C THERMAL", "mode": "slice", "duration": 6.6, "accel": 1.8, "cubeSize": 0.085, "zoom": 0.91 },
+    { "cuts": 150,  "tool": "ULTRASONIC",     "mode": "slice", "duration": 6.6, "accel": 2.0, "cubeSize": 0.06,  "zoom": 0.87 },
+    { "cuts": 400,  "tool": "PLASMA",         "mode": "pour",  "duration": 5.6, "accel": 1.3, "zoom": 0.84 },
+    { "cuts": 1000, "tool": "HYPER-SLICE",    "mode": "pour",  "duration": 6.4, "accel": 1.2, "zoom": 0.81 }
+  ],
+  "tools": {
+    "STEEL":          { "blade": "#cfd6de", "metalness": 0.92, "roughness": 0.24, "emissive": "#000000", "emissiveIntensity": 0,   "opacity": 1,    "edge": "#eaf2ff", "edgeGlow": 0.25, "light": "#cfe0ff", "lightIntensity": 1.5, "ghosts": 0 },
+    "1000°C THERMAL": { "blade": "#8d9097", "metalness": 0.7,  "roughness": 0.35, "emissive": "#ff4a08", "emissiveIntensity": 1.7, "opacity": 1,    "edge": "#ff7a1f", "edgeGlow": 1.0,  "light": "#ff6a1a", "lightIntensity": 6,   "ghosts": 0 },
+    "ULTRASONIC":     { "blade": "#aebcc9", "metalness": 0.85, "roughness": 0.22, "emissive": "#2fb8ff", "emissiveIntensity": 0.9, "opacity": 1,    "edge": "#8be6ff", "edgeGlow": 1.0,  "light": "#4cc8ff", "lightIntensity": 5,   "ghosts": 2, "ghostOpacity": 0.1 },
+    "PLASMA":         { "blade": "#b9a3ff", "metalness": 0.3,  "roughness": 0.3,  "emissive": "#a050ff", "emissiveIntensity": 0.7, "opacity": 0.55, "edge": "#e3b8ff", "edgeGlow": 0.8,  "light": "#a860ff", "lightIntensity": 8,   "ghosts": 4, "ghostOpacity": 0.08 },
+    "HYPER-SLICE":    { "blade": "#9fe8f2", "metalness": 0.1,  "roughness": 0.2,  "emissive": "#7cf3ff", "emissiveIntensity": 0.8, "opacity": 0.45,  "edge": "#ffffff", "edgeGlow": 1.0,  "light": "#8ff6ff", "lightIntensity": 10,  "ghosts": 5, "ghostOpacity": 0.07 }
+  }
+}

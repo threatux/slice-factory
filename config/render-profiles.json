@@ -1,0 +1,4 @@
+{
+  "draft": { "width": 540, "height": 960, "fps": 30, "shadowMapSize": 1024, "maxCubes": 400 },
+  "prod": { "width": 1080, "height": 1920, "fps": 60, "shadowMapSize": 2048, "maxCubes": 2500 }
+}
