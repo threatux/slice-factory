@@ -11,6 +11,7 @@ window.__RENDER_API__ = {
   step(dt) { game.step(dt); },
   isDone() { return game.isDone(); },
   getEvents() { return game.getEvents(); },
+  probe() { return game.probe(); },
 };
 
 // Manual preview in a normal browser: /?preview=draft&recipe=obsidian-lava&rounds=2 (real-time playback of fixed steps).

@@ -32,9 +32,12 @@
     .of { font-size: calc(var(--h) * .024); color: var(--dim); letter-spacing: .1em; }
     .cell { flex: 1; }
     .val { display: block; margin-top: calc(var(--h) * .006); font-size: calc(var(--h) * .046); font-weight: 300; letter-spacing: -.01em; }
-    #title { position: absolute; left: 6%; right: 6%; top: 36%; text-align: center; opacity: 0; }
-    #t-main { font-size: calc(var(--h) * .05); font-weight: 600; letter-spacing: .06em; line-height: 1.12; text-shadow: 0 0 calc(var(--h) * .02) rgba(0,0,0,.85); }
-    #t-sub { margin-top: calc(var(--h) * .012); font-size: calc(var(--h) * .0175); letter-spacing: .4em; color: var(--accent); }
+    #title { position: absolute; left: 4%; right: 4%; top: 63%; text-align: center; opacity: 0; white-space: nowrap;
+      text-shadow: 0 0 calc(var(--h) * .018) rgba(0,0,0,.9), 0 calc(var(--h) * .002) calc(var(--h) * .004) rgba(0,0,0,.8); }
+    #t-main { font-size: calc(var(--h) * .068); font-weight: 700; letter-spacing: .1em; line-height: 1; padding-left: .1em; }
+    #t-line2 { margin-top: calc(var(--h) * .008); font-size: calc(var(--h) * .03); font-weight: 600; letter-spacing: .28em; padding-left: .28em; line-height: 1.1; }
+    #t-line2 b { color: var(--accent); font-weight: 700; }
+    #t-sub { margin-top: calc(var(--h) * .012); font-size: calc(var(--h) * .0145); letter-spacing: .42em; padding-left: .42em; color: var(--accent); opacity: .9; }
   </style>
 </head>
 <body>
@@ -52,7 +55,7 @@
         <div class="cell"><span class="lbl">PARTICLE SIZE</span><span class="val" id="v-size">4.2 cm</span></div>
       </div>
     </div>
-    <div id="title"><div id="t-main"></div><div id="t-sub"></div></div>
+    <div id="title"><div id="t-main"></div><div id="t-line2"></div><div id="t-sub"></div></div>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>

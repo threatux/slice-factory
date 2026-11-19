@@ -10,7 +10,10 @@ export function createHud(profile, recipe) {
   const $ = (id) => document.getElementById(id);
   const hud = $('hud'), tool = $('tool'), roundTag = $('round'), cuts = $('v-cuts'), of = $('v-of');
   const pieces = $('v-pieces'), size = $('v-size'), title = $('title');
-  $('t-main').textContent = recipe.title;
+  // Hook card: two balanced lines (big subject / smaller tracked challenge), falls back to splitting the title at " vs ".
+  const lines = recipe.titleLines ?? (/ vs /i.test(recipe.title) ? [recipe.title.split(/ vs /i)[0], 'vs ' + recipe.title.split(/ vs /i)[1]] : [recipe.title, '']);
+  $('t-main').textContent = lines[0];
+  $('t-line2').textContent = lines[1] ?? '';
   $('t-sub').textContent = recipe.subtitle ?? '';
 
   const segs = $('segs');

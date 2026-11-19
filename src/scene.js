@@ -40,9 +40,9 @@ export function createScene(profile, pal) {
   scene.add(key);
 
   // Rim / back lights give obsidian its edge highlights.
-  const rim = new THREE.SpotLight(pal.accent, 110, 14, 0.7, 0.8, 2);
-  rim.position.set(-2.8, 3.6, -3.0);
-  rim.target.position.set(0, 0.6, 0);
+  const rim = new THREE.SpotLight(pal.accent, 35, 14, 0.7, 0.8, 2);
+  rim.position.set(-2.8, 1.3, -3.0); // low: grazes the edges, no orange glare blob on the glossy top
+  rim.target.position.set(0, 0.5, 0);
   const rim2 = new THREE.SpotLight(0x86b4ff, 70, 14, 0.7, 0.8, 2);
   rim2.position.set(3.2, 3.2, -3.0);
   rim2.target.position.set(0, 0.6, 0);

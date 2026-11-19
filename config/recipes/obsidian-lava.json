@@ -1,6 +1,7 @@
 {
   "id": "obsidian-lava",
   "title": "OBSIDIAN vs 1,000 CUTS",
+  "titleLines": ["OBSIDIAN", "vs 1,000 CUTS"],
   "subtitle": "PRECISION CUTTING LAB",
   "seed": 1337,
   "object": {
@@ -24,11 +25,11 @@
   },
   "timing": { "hook": 1.8, "drop": 0.25, "pre": 0.15, "settle": 0.55, "sweep": 0.55, "tail": 0.5, "rotate": 0.4, "gap": 0.9 },
   "rounds": [
-    { "cuts": 10,   "tool": "STEEL",          "mode": "slice", "duration": 6.6, "accel": 1.5, "cubeSize": 0.25,  "zoom": 0.95 },
-    { "cuts": 50,   "tool": "1000°C THERMAL", "mode": "slice", "duration": 6.6, "accel": 1.8, "cubeSize": 0.085, "zoom": 0.91 },
-    { "cuts": 150,  "tool": "ULTRASONIC",     "mode": "slice", "duration": 6.6, "accel": 2.0, "cubeSize": 0.06,  "zoom": 0.87 },
-    { "cuts": 400,  "tool": "PLASMA",         "mode": "pour",  "duration": 5.6, "accel": 1.3, "zoom": 0.84 },
-    { "cuts": 1000, "tool": "HYPER-SLICE",    "mode": "pour",  "duration": 6.4, "accel": 1.2, "zoom": 0.81 }
+    { "cuts": 10,   "tool": "STEEL",          "mode": "slice", "duration": 4.35, "phaseA": 1.1, "first": 0.28, "gap": 0.4, "rotLead": 0.05, "rotate": 0.25, "accel": 1.5, "cubeSize": 0.25, "cols": 6, "tiers": 2, "zoom": 1.0,  "finalSize": 0.011 },
+    { "cuts": 50,   "tool": "1000°C THERMAL", "mode": "slice", "duration": 6.6, "accel": 1.8, "cubeSize": 0.085, "zoom": 0.97, "finalSize": 0.0027 },
+    { "cuts": 150,  "tool": "ULTRASONIC",     "mode": "slice", "duration": 6.6, "accel": 2.0, "cubeSize": 0.06,  "zoom": 0.9,  "finalSize": 0.000694 },
+    { "cuts": 400,  "tool": "PLASMA",         "mode": "pour",  "duration": 5.6, "accel": 1.3, "zoom": 0.86, "pile": "gravel", "finalSize": 0.000177 },
+    { "cuts": 1000, "tool": "HYPER-SLICE",    "mode": "pour",  "duration": 6.4, "accel": 1.2, "zoom": 0.83, "pile": "sand",   "finalSize": 0.000045 }
   ],
   "tools": {
     "STEEL":          { "blade": "#cfd6de", "metalness": 0.92, "roughness": 0.24, "emissive": "#000000", "emissiveIntensity": 0,   "opacity": 1,    "edge": "#eaf2ff", "edgeGlow": 0.25, "light": "#cfe0ff", "lightIntensity": 1.5, "ghosts": 0 },
