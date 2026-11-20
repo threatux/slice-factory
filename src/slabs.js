@@ -208,3 +208,113 @@ export const SHARD_LOOKS = {
     rim: 0, sampLo: 0.1, sampHi: 0.9, seedFit: 1,
   },
 };
+
+/**
+ * Rubik's Cube skin (recipe.object.surfaceStyle = "rubiks"), shared by the intact cube (ingot.js) and its pieces (debris.js).
+ * The 3x3 sticker grid is sampled with INGOT-SPACE face UVs: P = aHome + position * uRCell (pieces: home cell centre + unit
+ * piece scaled by the cell size; intact cube: home 0, cell 1), so every cut piece shows exactly its own sub-window of the grid
+ * (no duplicated 3x3 per piece, no stretched halves). Face colour by the outward axis: +x, -x, +y, -y, +z, -z.
+ * Per-instance (pieces): aOutP/aOutN = 1 on faces that are the cube's outer skin, 0 = fresh cut (neon-prism core);
+ * uRMini = 1 (micro rounds): outer faces become whole mini tiles in the instance colour with a thin black plastic border.
+ * opts.anchor: shader chunk after which the albedo is replaced (ingot: map_fragment, so the seam pass still darkens it;
+ * instanced pieces: color_fragment, so the instance colour is not multiplied in twice).
+ */
+export function addRubiksSkin(mat, U, { instanced = false, anchor = '#include <map_fragment>' } = {}) {
+  const prev = mat.onBeforeCompile, prevKey = mat.customProgramCacheKey.bind(mat);
+  mat.onBeforeCompile = (sh, r) => {
+    prev(sh, r);
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+${instanced ? 'attribute vec3 aOutP; attribute vec3 aOutN; attribute vec3 aHome; attribute float aHeat;' : ''}
+varying vec3 vRP; varying vec3 vRN; varying vec3 vROutP; varying vec3 vROutN; varying vec3 vRHome; varying float vRHeat; varying vec2 vRSeed;
+varying vec3 vREx; varying vec3 vREy; varying vec3 vREz;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+vRP = position; vRN = normal;
+${instanced ? `vROutP = aOutP; vROutN = aOutN; vRHome = aHome; vRHeat = aHeat;
+vRSeed = fract(sin(vec2(float(gl_InstanceID) * 12.9898, float(gl_InstanceID) * 78.233)) * 43758.5453);
+mat3 rMV = mat3(modelViewMatrix * instanceMatrix);` : `vROutP = vec3(1.0); vROutN = vec3(1.0); vRHome = vec3(0.0); vRHeat = 0.0; vRSeed = vec2(0.0);
+mat3 rMV = mat3(modelViewMatrix);`}
+vREx = normalize(rMV * vec3(1.0, 0.0, 0.0)); vREy = normalize(rMV * vec3(0.0, 1.0, 0.0)); vREz = normalize(rMV * vec3(0.0, 0.0, 1.0));`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vRP; varying vec3 vRN; varying vec3 vROutP; varying vec3 vROutN; varying vec3 vRHome; varying float vRHeat; varying vec2 vRSeed;
+varying vec3 vREx; varying vec3 vREy; varying vec3 vREz;
+uniform sampler2D uRFace, uRCap, uRCapEmi;
+uniform vec3 uRCol[6]; uniform vec3 uRGroove, uRSize, uRCell;
+uniform float uRMini, uRBump, uRTexel, uRRim, uRInnerRough, uRInnerMetal, uRInnerCoat;
+uniform vec2 uRRough, uRCoat, uRInnerEmi, uRSamp;
+vec2 rAxOff(vec3 a) { return a.x >= a.y && a.x >= a.z ? vec2(0.37, 0.11) : a.y >= a.z ? vec2(0.08, 0.53) : vec2(0.0); }`)
+      .replace(anchor, `${anchor}
+vec3 rA = abs(vRN);
+vec3 rP = vRHome + vRP * uRCell;
+float rOut; vec2 rFc, rUv, rS; vec3 rCol, rTu, rTv;
+if (rA.x >= rA.y && rA.x >= rA.z) {
+  bool rPos = vRN.x > 0.0; rOut = rPos ? vROutP.x : vROutN.x; rFc = vRP.zy; rCol = rPos ? uRCol[0] : uRCol[1];
+  rUv = vec2(rP.z / uRSize.z, rP.y / uRSize.y) + 0.5; rS = uRSize.zy; rTu = vREz; rTv = vREy;
+} else if (rA.y >= rA.z) {
+  bool rPos = vRN.y > 0.0; rOut = rPos ? vROutP.y : vROutN.y; rFc = vRP.xz; rCol = rPos ? uRCol[2] : uRCol[3];
+  rUv = vec2(rP.x / uRSize.x, rP.z / uRSize.z) + 0.5; rS = uRSize.xz; rTu = vREx; rTv = vREz;
+} else {
+  bool rPos = vRN.z > 0.0; rOut = rPos ? vROutP.z : vROutN.z; rFc = vRP.xy; rCol = rPos ? uRCol[4] : uRCol[5];
+  rUv = vec2(rP.x / uRSize.x, rP.y / uRSize.y) + 0.5; rS = uRSize.xy; rTu = vREx; rTv = vREy;
+}
+float rM; vec2 rB = vec2(0.0);
+if (uRMini > 0.5) { // micro piece: the whole face is one tile in the instance colour, thin black plastic border
+  float rr = max(abs(rFc.x), abs(rFc.y)), rfw = max(fwidth(rr), 1e-4);
+  rM = 1.0 - smoothstep(0.5 - uRRim - rfw, 0.5 - uRRim + rfw, rr);
+#if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
+  rCol = vColor.rgb;
+#endif
+} else {
+  vec2 rUvc = clamp(rUv, 0.0, 1.0);
+  rM = texture2D(uRFace, rUvc).r;
+  rB = vec2(texture2D(uRFace, rUvc + vec2(uRTexel, 0.0)).g - texture2D(uRFace, rUvc - vec2(uRTexel, 0.0)).g,
+            texture2D(uRFace, rUvc + vec2(0.0, uRTexel)).g - texture2D(uRFace, rUvc - vec2(0.0, uRTexel)).g) * uRBump * rOut;
+}
+float rIn = 1.0 - rOut;
+vec2 rCapUv = uRMini > 0.5 ? vec2(uRSamp.x) + vRSeed * (uRSamp.y - uRSamp.x - 0.22) + (rFc + 0.5) * 0.22 + rAxOff(rA)
+                           : vec2(0.04) + rUv * 0.92 + rAxOff(rA);
+vec3 rCapE = texture2D(uRCapEmi, rCapUv).rgb;
+diffuseColor.rgb = mix(mix(uRGroove, rCol, rM), texture2D(uRCap, rCapUv).rgb, rIn);`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+roughnessFactor = mix(mix(uRRough.y, uRRough.x, rM), uRInnerRough, rIn);`)
+      .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+metalnessFactor = mix(metalnessFactor, uRInnerMetal, rIn);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+normal = normalize(normal - rB.x * rTu - rB.y * rTv);`)
+      .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+#ifdef USE_CLEARCOAT
+material.clearcoat = mix(mix(uRCoat.y, uRCoat.x, rM), uRInnerCoat, rIn);
+#endif`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+totalEmissiveRadiance += rIn * rCapE * (uRInnerEmi.x + uRInnerEmi.y * clamp(vRHeat, 0.0, 1.0));`);
+  };
+  mat.customProgramCacheKey = () => prevKey() + (instanced ? '+rubiks-skin-inst-v1' : '+rubiks-skin-v1');
+}
+
+/** Uniforms of the Rubik skin (cfg = recipe.object.rubiks overrides, face = makeRubiksFace(), cap = makeNeonPrismCap()). */
+export function rubiksUniforms(size, face, cap, cfg = {}) {
+  const c = {
+    colors: ['#0051ba', '#009e49', '#f2f2f5', '#ffd000', '#d90429', '#ff6b00'], groove: '#0b0c10', tileRough: 0.14, grooveRough: 0.45,
+    tileCoat: 0.9, grooveCoat: 0.25, bump: 2.2, rim: 0.09, innerRough: 0.42, innerMetal: 0.0, innerCoat: 0.3, innerEmi: [0.35, 0.9], ...cfg,
+  };
+  return {
+    uRFace: { value: face.map }, uRCap: { value: cap.map }, uRCapEmi: { value: cap.emissive },
+    uRCol: { value: c.colors.map((h) => new THREE.Color(h)) }, uRGroove: { value: new THREE.Color(c.groove) },
+    uRSize: { value: new THREE.Vector3(...size) }, uRCell: { value: new THREE.Vector3(1, 1, 1) },
+    uRMini: { value: 0 }, uRBump: { value: c.bump }, uRTexel: { value: 1.5 / face.size }, uRRim: { value: c.rim },
+    uRRough: { value: new THREE.Vector2(c.tileRough, c.grooveRough) }, uRCoat: { value: new THREE.Vector2(c.tileCoat, c.grooveCoat) },
+    uRInnerRough: { value: c.innerRough }, uRInnerMetal: { value: c.innerMetal }, uRInnerCoat: { value: c.innerCoat }, uRInnerEmi: { value: new THREE.Vector2(...c.innerEmi) },
+    uRSamp: { value: new THREE.Vector2(0.05, 0.95) },
+  };
+}
+
+/** Instanced piece material for the Rubik's cube (R1-R6). userData.rubiks = uniforms (debris sets uRCell / uRMini per round). */
+export function makeRubiksShardMaterial(size, face, cap, cfg = {}) {
+  const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 1, metalness: 0, clearcoat: 0.9, clearcoatRoughness: 0.08, envMapIntensity: cfg.envMapIntensity ?? 1.0 });
+  const U = rubiksUniforms(size, face, cap, cfg);
+  addRubiksSkin(mat, U, { instanced: true, anchor: '#include <color_fragment>' });
+  mat.userData.rubiks = U;
+  return mat;
+}

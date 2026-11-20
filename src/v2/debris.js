@@ -6,10 +6,10 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
-import { makeShardMaterial, SHARD_LOOKS } from '../slabs.js';
+import { makeShardMaterial, SHARD_LOOKS, makeRubiksShardMaterial } from '../slabs.js';
 import { makeGoldCast, makeEmeraldCap, makeRubyCap, makeVolcanicObsidian, makeMagmaCap } from '../textures.js';
 import { LAYOUT } from '../config.js';
-import { makeEarth, makeCryoIce } from '../textures.js';
+import { makeEarth, makeCryoIce, makeRubiksFace, makeNeonPrismCap } from '../textures.js';
 import { sphereTriangles, sphereCellKeep, clipSphereCell, pieceGeometry } from './sphere.js';
 import { makeLayeredPieceMaterial, makeEarthGrainMaterial, grainLook, grainLookState, crystalGeometry,
   makeCryoPieceMaterial, makeCryoGrainMaterial, cryoGrainLook } from './earth.js';
@@ -44,6 +44,7 @@ function instanced(geo, mat, cap, shadows) {
   geo.setAttribute('aOutP', new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3));
   geo.setAttribute('aOutN', new THREE.InstancedBufferAttribute(new Float32Array(cap * 3).fill(1), 3));
   geo.setAttribute('aHeat', new THREE.InstancedBufferAttribute(new Float32Array(cap), 1));
+  if (mat.userData.rubiks) geo.setAttribute('aHome', new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3)); // Rubik: home cell centre (ingot space)
   const mesh = new THREE.InstancedMesh(geo, mat, cap);
   mesh.setColorAt(0, new THREE.Color(1, 1, 1));
   mesh.count = 0;
@@ -84,6 +85,9 @@ export async function createDebris({ recipe, profile, scene, G }) {
   const volcanic = recipe.object.surfaceStyle === 'obsidian'; // volcanic glass shell + molten magma fracture faces (default: gold + emerald)
   const sph = recipe.object.shape === 'sphere'; // Planet Earth: clipped ball pieces (R1-R3) + radius-coloured micro pieces (R4-R6)
   const cryo = sph && recipe.object.coreStyle === 'cryo-plasma'; // Cryo Ice: glacial skin + cryo-plasma layers (Earth defaults otherwise)
+  const rubik = !sph && recipe.object.surfaceStyle === 'rubiks'; // Rubik's cube: sticker skin with ingot-space sub-UVs + neon-prism core
+  const rcfg = { microShell: 0.2, ...(recipe.object.rubiks ?? {}) };
+  const rFaceCols = (rcfg.colors ?? ['#0051ba', '#009e49', '#f2f2f5', '#ffd000', '#d90429', '#ff6b00']).map((c) => new THREE.Color(c));
   const rounds = recipe.v2.rounds;
   let big = null, chunks, grains, chunkCap, grainMat = null;
   if (sph) {
@@ -93,7 +97,8 @@ export async function createDebris({ recipe, profile, scene, G }) {
     grains = instanced(new THREE.BoxGeometry(1, 1, 1), gm, profile.maxShards ?? 8000, true);
     scene.add(chunks, grains);
   } else {
-    const mat = volcanic
+    const mat = rubik ? makeRubiksShardMaterial([W, H, D], makeRubiksFace(), makeNeonPrismCap(pal), rcfg)
+      : volcanic
       ? makeShardMaterial(makeVolcanicObsidian(pal), makeMagmaCap(pal, W / H), SHARD_LOOKS['obsidian-magma'])
       : makeShardMaterial(makeGoldCast(pal), makeEmeraldCap(pal, W / H), { ...SHARD_LOOKS['gold-emerald'], ruby: makeRubyCap(pal, W / H) });
     chunkCap = Math.max(64, ...rounds.filter((r) => (r.tier ?? 1) < 4).map((r) => r.grid[0] * r.grid[1] * r.grid[2]));
@@ -210,6 +215,38 @@ export async function createDebris({ recipe, profile, scene, G }) {
     return S;
   }
 
+  /**
+   * Rubik pieces: aHome = home cell centre (exact sticker sub-UVs on R1-R3), uRCell / uRMini per round. Micro rounds (tier >= 3):
+   * pieces within the outer microShell (fraction of the half-extent, >= 1 layer) become whole mini tiles in the colour of their
+   * nearest cube face (all faces skin, black border in the shader); the rest are pure neon-prism core (no skin faces).
+   */
+  function rubikCells(S, mesh, [nx, ny, nz], cell) {
+    const U = mesh.material.userData.rubiks, mini = S.R.tier >= 3;
+    U.uRCell.value.set(...cell);
+    U.uRMini.value = mini ? 1 : 0;
+    const aHome = mesh.geometry.attributes.aHome, aOutP = mesh.geometry.attributes.aOutP, aOutN = mesh.geometry.attributes.aOutN;
+    const col = new THREE.Color(), dims = [nx, ny, nz];
+    let i = 0;
+    for (let a = 0; a < nx; a++) for (let b = 0; b < ny; b++) for (let c = 0; c < nz; c++, i++) {
+      aHome.setXYZ(i, S.home[i * 3], S.home[i * 3 + 1], S.home[i * 3 + 2]);
+      if (!mini) { mesh.setColorAt(i, col.setRGB(1, 1, 1)); continue; }
+      // distance (in layers) to each face: +x, -x, +y, -y, +z, -z
+      const dist = [nx - 1 - a, a, ny - 1 - b, b, nz - 1 - c, c];
+      let best = 0;
+      for (let f = 1; f < 6; f++) if (dist[f] < dist[best] || (dist[f] === dist[best] && hash(i * 0.91 + f * 3.3) > 0.5)) best = f;
+      const layers = Math.max(1, Math.round(rcfg.microShell * dims[best >> 1] * 0.5));
+      if (dist[best] < layers) {
+        aOutP.setXYZ(i, 1, 1, 1); aOutN.setXYZ(i, 1, 1, 1);
+        const k = 0.94 + 0.12 * hash(i * 3.1 + 7);
+        mesh.setColorAt(i, col.copy(rFaceCols[best]).multiplyScalar(k));
+      } else {
+        aOutP.setXYZ(i, 0, 0, 0); aOutN.setXYZ(i, 0, 0, 0);
+        mesh.setColorAt(i, col.setRGB(1, 1, 1));
+      }
+    }
+    aHome.needsUpdate = true;
+  }
+
   function buildSet(R, pose, t) {
     if (sph) return buildSphereSet(R, pose, t);
     const [nx, ny, nz] = R.grid, n = nx * ny * nz;
@@ -239,6 +276,7 @@ export async function createDebris({ recipe, profile, scene, G }) {
       const k = 0.9 + 0.2 * hash(i * 3.1 + 7);
       mesh.setColorAt(i, col.setRGB(k, k, k));
     }
+    if (rubik) rubikCells(S, mesh, [nx, ny, nz], [cw, ch, cd]);
     aOutP.needsUpdate = aOutN.needsUpdate = aHeat.needsUpdate = true;
     mesh.instanceColor.needsUpdate = true;
     mesh.count = n;
@@ -296,7 +334,8 @@ export async function createDebris({ recipe, profile, scene, G }) {
     for (let i = 0; i < S.n; i++) {
       const hx = S.home[i * 3], hy = S.home[i * 3 + 1], hz = S.home[i * 3 + 2];
       const r1 = hash(i * 1.1 + R.index), r2 = hash(i * 2.3 + 5), r3 = hash(i * 3.7 + 9), r4 = hash(i * 5.3 + 13);
-      const ang = Math.atan2(hz + (r1 - 0.5) * 0.5, hx + (r2 - 0.5) * 0.5) + (r3 - 0.5) * 0.7;
+      let ang = Math.atan2(hz + (r1 - 0.5) * 0.5, hx + (r2 - 0.5) * 0.5) + (r3 - 0.5) * 0.7;
+      if (rubik && rcfg.scatter) ang += (hash(i * 6.1 + 17 + R.index) - 0.5) * 2 * Math.PI * rcfg.scatter; // Rubik: mix the six face colours in the heap
       const radial = Math.min(1, Math.hypot(hx / (W / 2), hz / (D / 2)) / 1.41);
       const yN = (hy + H / 2) / H;
       const s = R.spread * (0.12 + 0.88 * Math.pow(r4, R.pile ? 1.5 : 0.85)) * (0.55 + 0.45 * radial) * (sph ? 0.4 + 0.8 * Math.min(1, Math.hypot(hx, hy, hz) / SR) : 1); // sphere: crust flies wider, the core stays central

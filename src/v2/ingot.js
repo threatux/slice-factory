@@ -2,7 +2,8 @@
 // X/Y/Z seam lines computed in the fragment shader from object-space position (no decal geometry -> no Z-fighting).
 import * as THREE from 'three';
 import { blockGeometry, addIngotDecals } from '../objects.js';
-import { makeGoldCast, makeIngotDecals, makeVolcanicObsidian, makeEarth, makeCryoIce } from '../textures.js';
+import { makeGoldCast, makeIngotDecals, makeVolcanicObsidian, makeEarth, makeCryoIce, makeRubiksFace, makeNeonPrismCap } from '../textures.js';
+import { addRubiksSkin, rubiksUniforms } from '../slabs.js';
 import { makeAtmosphere } from './earth.js';
 
 /**
@@ -130,9 +131,9 @@ function createPlanet(recipe) {
 }
 
 /** Planet API for the cloud-less sphere looks (identical behaviour to the Earth object above). */
-function planetApi(frame, mesh, R, earth, extras, U, seamCfg) {
+function planetApi(frame, mesh, R, earth, extras, U, seamCfg, size = [2 * R, 2 * R, 2 * R]) {
   return {
-    frame, mesh, size: [2 * R, 2 * R, 2 * R], earth,
+    frame, mesh, size, earth,
     setPose(y, yaw) { frame.position.set(0, y, 0); frame.rotation.set(0, yaw, 0); frame.updateMatrixWorld(true); },
     setVisible(v) { mesh.visible = v; for (const e of extras) e.visible = v; },
     setSeams(s) {
@@ -151,8 +152,35 @@ function planetApi(frame, mesh, R, earth, extras, U, seamCfg) {
   };
 }
 
+/**
+ * Rubik's cube (recipe.object.surfaceStyle === "rubiks"): rounded W x H x D block (1:1:1 in the recipe) with the shared Rubik skin
+ * (3x3 glossy ABS tiles per face, black grooves, bump bevels; slabs.js addRubiksSkin) + the usual seam pass. No stamp/decals.
+ */
+function createRubiks(recipe) {
+  const cfg = recipe.object, pal = recipe.palette;
+  const [W, H, D] = cfg.size;
+  const seamCfg = { width: 0.024, glow: 2.4, flash: 5, ...(recipe.v2.seam ?? {}) };
+  const [c1, c2] = pal.seam ?? ['#ffffff', pal.core];
+  const frame = new THREE.Group();
+  const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 1, metalness: 0, clearcoat: 0.9, clearcoatRoughness: 0.08, envMapIntensity: cfg.rubiks?.envMapIntensity ?? 1.0 });
+  const U = {
+    uSN: { value: new THREE.Vector3(1, 1, 1) }, uSLo: { value: new THREE.Vector3(1, 1, 1) }, uSHi: { value: new THREE.Vector3(1, 1, 1) },
+    uSRev: { value: new THREE.Vector3() }, uSFlash: { value: new THREE.Vector3() }, uSW: { value: new THREE.Vector3(0.02, 0.02, 0.02) },
+    uHalf: { value: new THREE.Vector3(W / 2, H / 2, D / 2) },
+    uSCol: { value: new THREE.Color(c1) }, uSCol2: { value: new THREE.Color(c2) },
+    uSGlow: { value: seamCfg.glow }, uSFl: { value: seamCfg.flash }, uSAlpha: { value: 1 },
+  };
+  addSeams(mat, U);
+  addRubiksSkin(mat, rubiksUniforms([W, H, D], makeRubiksFace(), makeNeonPrismCap(pal), cfg.rubiks ?? {}));
+  const mesh = new THREE.Mesh(blockGeometry(W, H, D, cfg.bevel ?? 0.025, 17, 0), mat);
+  mesh.castShadow = mesh.receiveShadow = true;
+  frame.add(mesh);
+  return planetApi(frame, mesh, W / 2, null, [], U, seamCfg, [W, H, D]);
+}
+
 export function createIngot(recipe) {
   if (recipe.object.shape === 'sphere') return createPlanet(recipe);
+  if (recipe.object.surfaceStyle === 'rubiks') return createRubiks(recipe);
   const cfg = recipe.object, pal = recipe.palette;
   const [W, H, D] = cfg.size;
   const bevel = cfg.bevel ?? 0.045;

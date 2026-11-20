@@ -972,3 +972,91 @@ export function makeCryoIce(opts = {}) {
   iceCache.set(key, out);
   return out;
 }
+
+// ======================================================================================================
+// Rubik's Cube look (recipe.object.surfaceStyle = "rubiks", coreStyle = "neon-prism"). Nothing above calls this.
+// ======================================================================================================
+let rubiksFace = null;
+/**
+ * One face of the cube as DATA (linear, 768², not tileable): 3x3 rounded glossy tiles separated by ~10% black grooves
+ * (half a groove along the face border). R = tile mask (1 px AA), G = height (groove 0 -> 12 px bevel -> slightly domed plateau),
+ * B = faint ABS moulding noise. Sampled with ingot-space face UVs (so every cut piece keeps its exact sub-window of the grid).
+ */
+export function makeRubiksFace() {
+  if (rubiksFace) return rubiksFace;
+  // margin m along the face border (black plastic body around the bevel), groove g between tiles (~10% of a cell)
+  const S = 768, m = 0.085 * (S / 3), g = 0.1 * (S / 3), ts = (S - 2 * m - 2 * g) / 3, b = ts / 2, r = 0.13 * ts, bev = 12;
+  const centre = (x) => m + clamp(Math.floor((x - m + g / 2) / (ts + g)), 0, 2) * (ts + g) + ts / 2; // centre of the tile column/row of x
+  const map = pixelData(S, S, (x, y) => {
+    const cx = centre(x + 0.5), cy = centre(y + 0.5);
+    const px = Math.abs(x + 0.5 - cx), py = Math.abs(y + 0.5 - cy);
+    const qx = Math.max(px - b + r, 0), qy = Math.max(py - b + r, 0);
+    const d = Math.hypot(qx, qy) + Math.min(Math.max(px - b + r, py - b + r), 0) - r; // rounded-rect SDF (px, <0 inside)
+    const m = clamp(0.5 - d, 0, 1);
+    const dome = 1 - 0.05 * ((px * px + py * py) / (b * b));
+    const hgt = sstep(0, bev, -d) * dome; // groove floor (0) stays flat
+    const n = fbm(x / 9, y / 9, 1e6, 41, 3);
+    return [m * 255, clamp(hgt, 0, 1) * 255, n * 255];
+  }, false);
+  map.generateMipmaps = true; map.minFilter = THREE.LinearMipmapLinearFilter; map.magFilter = THREE.LinearFilter;
+  rubiksFace = { map, size: S };
+  return rubiksFace;
+}
+
+const prismCache = new Map();
+/**
+ * Neon-prism cyber-core cut face (1024², tileable): dark woven carbon matrix (pal.carbon, default #0b0c14), large crystalline
+ * Voronoi facets with a faint prismatic sheen, and a contrast network of neon veins whose hue drifts along a cyclic ramp
+ * (pal.prism, default magenta -> UV -> cyan -> electric gold). Emissive ONLY on the veins (no white-out patch).
+ * Returns { map, emissive } (same keys the shard shader expects from a cap).
+ */
+export function makeNeonPrismCap(pal) {
+  const prism = pal.prism ?? ['#ff007f', '#7b2cbf', '#00f5d4', '#ffd166'];
+  const key = `prism|${prism.join('')}|${pal.carbon ?? ''}`;
+  if (prismCache.has(key)) return prismCache.get(key);
+  const P = prism.map(srgbBytes), carbon = srgbBytes(pal.carbon ?? '#0b0c14');
+  const S = 1024;
+  // periodic jittered-grid Voronoi: returns [F2 - F1 (px), cell hash]
+  const vor = (x, y, n, seed) => {
+    const c = S / n, gx = Math.floor(x / c), gy = Math.floor(y / c);
+    let f1 = 1e9, f2 = 1e9, id = 0;
+    for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) {
+      const cx = gx + i, cy = gy + j, wx = ((cx % n) + n) % n, wy = ((cy % n) + n) % n;
+      const sx = (cx + 0.15 + 0.7 * hash2(wx, wy, seed)) * c, sy = (cy + 0.15 + 0.7 * hash2(wx, wy, seed + 1)) * c;
+      const d = Math.hypot(x - sx, y - sy);
+      if (d < f1) { f2 = f1; f1 = d; id = hash2(wx, wy, seed + 2); } else if (d < f2) f2 = d;
+    }
+    return [f2 - f1, id];
+  };
+  const ramp = (s) => { // cyclic 4-stop ramp
+    const u = ((s % 1) + 1) % 1 * P.length, k = Math.floor(u), f = sstep(0, 1, u - k), A = P[k], B = P[(k + 1) % P.length];
+    return [A[0] + (B[0] - A[0]) * f, A[1] + (B[1] - A[1]) * f, A[2] + (B[2] - A[2]) * f];
+  };
+  const alb = new Float32Array(S * S * 3), emi = new Float32Array(S * S * 3);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const wx = x + (fbm(x / 64, y / 64, 16, 7) - 0.5) * 46, wy = y + (fbm(x / 64 + 5, y / 64, 16, 9) - 0.5) * 46;
+    const [a, ida] = vor(wx, wy, 6, 101), [bq] = vor(wx + 3, wy - 5, 16, 211);
+    // woven 2x2 twill carbon (tows 16 px), sheen along each tow
+    const tx = Math.floor(x / 16), ty = Math.floor(y / 16), horiz = ((tx + ty) & 3) < 2;
+    const along = horiz ? (x % 16) / 16 : (y % 16) / 16, across = horiz ? (y % 16) / 16 : (x % 16) / 16;
+    const weave = 0.78 + 0.32 * Math.sin(Math.PI * across) * (0.8 + 0.2 * Math.sin(2 * Math.PI * along));
+    // crystalline facet sheen: each big cell a faint prism tint + a soft linear gradient
+    const ft = ramp(ida * 1.7 + 0.13), fg = 0.5 + 0.5 * Math.sin((wx * (0.4 + ida) + wy * (1 - ida)) / 90 + ida * 9);
+    const thin = sstep(0.45, 0.62, fbm(x / 128, y / 128, 8, 23)); // only part of the fine network lights up
+    const hue = fbm(x / 128, y / 128, 8, 31) * 1.6 + ida * 0.22;
+    const vc = ramp(hue);
+    const core = Math.exp(-(a * a) / 2.2) + 0.55 * thin * Math.exp(-(bq * bq) / 0.9);
+    const glow = Math.exp(-a / 7) * 0.5 + 0.18 * thin * Math.exp(-bq / 3.5);
+    const i3 = (y * S + x) * 3;
+    for (let k = 0; k < 3; k++) {
+      const base = carbon[k] * weave + ft[k] * 0.07 * fg;
+      alb[i3 + k] = base * (1 - Math.min(1, core) * 0.6) + vc[k] * (0.55 * Math.min(1, core) + 0.1 * glow);
+      emi[i3 + k] = vc[k] * Math.min(1, core * 0.95 + glow * 0.35) + 255 * 0.22 * Math.pow(Math.min(1, core), 6);
+    }
+  }
+  const at = (buf) => (x, y) => { const i = (y * S + x) * 3; return [clamp(buf[i]), clamp(buf[i + 1]), clamp(buf[i + 2])]; };
+  const map = repeat(pixelData(S, S, at(alb))), emissive = repeat(pixelData(S, S, at(emi)));
+  const out = { map, emissive };
+  prismCache.set(key, out);
+  return out;
+}

@@ -1,0 +1,126 @@
+{
+  "id": "rubiks-cube-v2",
+  "engine": "v2",
+  "title": "RUBIK'S CUBE 3x3",
+  "audioProfile": "slizzy_plastic",
+  "seed": 1383,
+  "object": {
+    "type": "procedural",
+    "material": "rubiks-abs",
+    "shape": "box",
+    "surfaceStyle": "rubiks",
+    "coreStyle": "neon-prism",
+    "engraving": false,
+    "size": [1.56, 1.56, 1.56],
+    "bevel": 0.025,
+    "rubiks": {
+      "colors": ["#0051ba", "#009e49", "#f2f2f5", "#ffd000", "#d90429", "#ff6b00"],
+      "groove": "#0b0c10",
+      "tileRough": 0.14,
+      "grooveRough": 0.45,
+      "tileCoat": 0.9,
+      "grooveCoat": 0.25,
+      "bump": 2.2,
+      "rim": 0.09,
+      "innerRough": 0.6,
+      "innerMetal": 0.0,
+      "innerCoat": 0.12,
+      "innerEmi": [0.5, 1.2],
+      "microShell": 0.2,
+      "scatter": 0.85,
+      "envMapIntensity": 1.0
+    }
+  },
+  "scene": { "environmentIntensity": 0.45, "rimIntensity": 9 },
+  "palette": {
+    "shell": "#0b0c10",
+    "inner": "#7b2cbf",
+    "core": "#ff007f",
+    "accent": "#ff4fa3",
+    "accent2": "#00f5d4",
+    "crumb": "#d90429",
+    "crumbHi": "#ffd000",
+    "magma": "#ff007f",
+    "crackGlow": "#ff007f",
+    "carbon": "#0b0c14",
+    "prism": ["#ff007f", "#7b2cbf", "#00f5d4", "#ffd166"],
+    "gold": "#ff007f",
+    "table": "#0e0f13",
+    "background": "#050609",
+    "sparkColors": ["#ff007f", "#ff6ec7", "#ffffff"],
+    "sparkGold": "#00f5d4",
+    "dustGlint": [1.2, 1.0, 1.3],
+    "seam": ["#f4ffff", "#00f5d4"],
+    "ruby": { "shape": "crystal", "size": 0.22, "restY": 0.13, "color": "#ff007f", "emissive": "#6200ea", "emissiveIntensity": 0.25,
+      "metalness": 0.35, "envMapIntensity": 1.0, "roughness": 0.05, "clearcoat": 1.0, "ior": 2.2,
+      "light": "#ff4fd8", "lightIntensity": 0.7, "lightGather": 1.0,
+      "gradient": ["#6200ea", "#ff007f", "#00f5d4", "#ffe600"] },
+    "dust": [["#f2f2f5", 0.1], ["#ffd000", 0.12], ["#d90429", 0.12], ["#ff6b00", 0.11], ["#009e49", 0.11], ["#0051ba", 0.12],
+      ["#0b0c14", 0.16], ["#ff007f", 0.07], ["#00f5d4", 0.06], ["#7b2cbf", 0.03]],
+    "crystal": { "emerald": 0.5 }
+  },
+  "tools": {
+    "SANTOKU": { "blade": "#e8ecf2", "metalness": 0.6, "roughness": 0.25, "emissive": "#ff007f", "emissiveIntensity": 1.5, "opacity": 1, "edge": "#ffffff", "edgeGlow": 1.2, "light": "#ff4fa3", "lightIntensity": 6, "ghosts": 3, "ghostOpacity": 0.12 }
+  },
+  "v2": {
+    "duration": 30.4,
+    "dustScale": 3,
+    "softEdge": true,
+    "hud": { "badgeFrom": "#ff007f", "badgeTo": "#ffd000", "badgeText": "#14001f", "bonusFrom": "#00f5d4", "bonusMid": null, "bonusTo": "#ff007f", "hot": "#00f5d4", "textShadowStrong": true },
+    "levitateY": 1.8,
+    "fall": 0.2,
+    "reassemble": 0.3,
+    "bob": { "amp": 0.025, "cycles": 18, "yaw": 0.06, "yawCycles": 9 },
+    "ghost": { "color": "#ff007f", "edge": "#ffffff", "opacity": 0.2, "stagger": 0.012 },
+    "knife": { "tool": "SANTOKU", "overshoot": 0.6, "trail": 3 },
+    "seam": { "width": 0.012, "glow": 2.0, "flash": 4.0 },
+    "hook": {
+      "end": 1.35, "whipEnd": 1.65, "grid": [6, 6, 6],
+      "title": "1 Cut vs 40 Cuts", "badge": "Wait for BONUS 100 Cuts 👀",
+      "passes": [
+        { "axis": "x", "t": 0.05, "dur": 0.3, "fan": 8 },
+        { "axis": "y", "t": 0.43, "dur": 0.3, "fan": 8 },
+        { "axis": "z", "t": 0.82, "dur": 0.33, "fan": 8 }
+      ],
+      "crumbs": 90
+    },
+    "rounds": [
+      { "label": "1 Cut", "pieces": "2 Pieces", "start": 1.65, "grid": [2, 1, 1], "physics": "rapier", "tier": 1, "impact": 2.55, "shake": 0.09, "pop": 1.8,
+        "passes": [{ "axis": "x", "t": 1.88, "dur": 0.22 }] },
+      { "label": "3 Cuts", "pieces": "8 Pieces", "start": 4.0, "grid": [2, 2, 2], "physics": "rapier", "tier": 2, "impact": 5.6, "shake": 0.08, "pop": 3.4, "ruby": true,
+        "passes": [{ "axis": "x", "t": 4.3, "dur": 0.26 }, { "axis": "y", "t": 4.61, "dur": 0.26 }, { "axis": "z", "t": 4.92, "dur": 0.26 }] },
+      { "label": "9 Cuts", "pieces": "64 Pieces", "start": 7.15, "grid": [4, 4, 4], "physics": "rapier", "tier": 2, "impact": 9.35, "shake": 0.08, "pop": 4.4, "ruby": true, "drizzle": 60,
+        "passes": [
+          { "axis": "x", "t": 7.45, "dur": 0.15 }, { "axis": "y", "t": 7.62, "dur": 0.15 }, { "axis": "z", "t": 7.79, "dur": 0.15 },
+          { "axis": "x", "t": 7.96, "dur": 0.15 }, { "axis": "y", "t": 8.13, "dur": 0.15 }, { "axis": "z", "t": 8.3, "dur": 0.15 },
+          { "axis": "x", "t": 8.47, "dur": 0.15 }, { "axis": "y", "t": 8.64, "dur": 0.15 }, { "axis": "z", "t": 8.8, "dur": 0.15 }
+        ] },
+      { "label": "25 Cuts", "pieces": "512 Pieces", "start": 11.0, "grid": [8, 8, 8], "physics": "analytic", "tier": 3, "impact": 13.7, "shake": 0.1, "spread": 9.5, "silence": true, "drizzle": 90,
+        "passes": [{ "axis": "x", "t": 11.3, "dur": 0.3, "fan": 8 }, { "axis": "y", "t": 12.35, "dur": 0.3, "fan": 8 }, { "axis": "z", "t": 13.0, "dur": 0.3, "fan": 8 }] },
+      { "label": "40 Cuts", "pieces": "2,500+ Pieces", "start": 15.55, "grid": [14, 14, 14], "physics": "analytic", "tier": 3, "impact": 18.45, "shake": 0.12, "spread": 12.5, "silence": true, "pulse": 1, "drizzle": 140,
+        "passes": [
+          { "axis": "x", "t": 15.85, "dur": 0.26, "fan": 8 }, { "axis": "y", "t": 16.18, "dur": 0.26, "fan": 8 }, { "axis": "z", "t": 16.51, "dur": 0.26, "fan": 8 },
+          { "axis": "x", "t": 17.08, "dur": 0.26, "fan": 8 }, { "axis": "y", "t": 17.41, "dur": 0.26, "fan": 8 }, { "axis": "z", "t": 17.74, "dur": 0.26, "fan": 8 }
+        ] },
+      { "label": "BONUS: 100 Cuts", "pieces": "15,000+ Pieces", "bonus": true, "start": 20.45, "grid": [25, 25, 25], "physics": "analytic", "tier": 4, "dropAt": 24.5, "shake": 0.16, "spread": 9.5, "pile": { "h": 0.9, "sigma": 1.5 },
+        "silence": true, "pulse": 1, "levitateY": 2.05, "rise": [20.45, 21.05], "rain": [21.55, 24.15, 900], "dust": true,
+        "passes": [
+          { "axis": "x", "t": 21.15, "dur": 0.34, "fan": 8 }, { "axis": "y", "t": 21.95, "dur": 0.34, "fan": 8 },
+          { "axis": "z", "t": 22.75, "dur": 0.34, "fan": 8 }, { "axis": "d", "t": 23.81, "dur": 0.34, "fan": 8 }
+        ] }
+    ],
+    "finale": { "text": "What should we cut next? 👇", "in": 26.1, "out": 28.3, "rewind": 28.3, "converge": 29.95 },
+    "camera": {
+      "macro": { "pos": [2.45, 4.35, 4.3], "look": [0.0, 1.95, 0.0], "fov": 50 },
+      "work": { "pos": [2.55, 4.1, 6.1], "look": [0.2, 0.95, 0.3], "fov": 62 },
+      "push": { "pos": [1.85, 3.35, 4.95], "look": [0.0, 1.2, 0.15], "fov": 58 },
+      "bonus": { "pos": [1.55, 3.4, 4.45], "look": [0.0, 1.75, 0.0], "fov": 58 },
+      "wide": { "pos": [1.5, 2.8, 3.8], "look": [0.0, 0.1, 1.3], "fov": 50 },
+      "breath": 4,
+      "keys": [
+        [0.0, "macro"], [1.35, "macro"], [1.65, "work"], [15.55, "work"], [16.65, "push"], [20.45, "push"], [21.05, "bonus"],
+        [24.55, "bonus"], [25.55, "wide"], [28.3, "wide"], [29.95, "macro"], [30.4, "macro"]
+      ]
+    }
+  }
+}
