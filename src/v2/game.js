@@ -17,6 +17,10 @@ export async function createGameV2(profile, recipe) {
     const r = recipe.object.radius;
     recipe = { ...recipe, object: { ...recipe.object, size: [2 * r, 2 * r, 2 * r] } };
   }
+  if (recipe.object.shape === 'cylinder') { // vertical rod radius r, height h: bounding box [2r, h, 2r] (centre lands on y = h/2)
+    const r = recipe.object.radius, h = recipe.object.height;
+    recipe = { ...recipe, object: { ...recipe.object, size: [2 * r, h, 2 * r] } };
+  }
   const pal = recipe.palette;
   const tl = buildTimelineV2(recipe, profile);
   const { rounds, duration } = tl;

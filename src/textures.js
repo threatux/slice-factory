@@ -1060,3 +1060,135 @@ export function makeNeonPrismCap(pal) {
   prismCache.set(key, out);
   return out;
 }
+
+// ======================================================================================================
+// Uranium fuel rod (recipe.object.shape = "cylinder", surfaceStyle = "uranium-rod"). Nothing above calls this.
+// ======================================================================================================
+/**
+ * Atlas layout (canvas px, flipY): rows 0..side = cylinder wall (u = angle, 0.5 = +z, row 0 = top of the rod), bottom strip =
+ * two lid discs (top lid centre caps[0], bottom lid caps[1], radius capR). Shared with src/v2/cylinder.js cylUV().
+ */
+export const URANIUM_ATLAS = { W: 2048, H: 1536, side: 1024, capR: 236, caps: [[256, 1280], [768, 1280]] };
+const uraniumCache = new Map();
+/**
+ * Brushed gun-metal titanium capsule: horizontal brushing + panel seams + rivets, diagonal yellow/black hazard bands top and
+ * bottom, yellow trefoil + "U-235 // CORE" on the camera side (u = front), narrow cooling slots leaking acid-green light, lathe-
+ * turned lids with concentric grooves, bolts and a glowing green indicator ring. Returns { map, ormMap (G = rough, B = metal),
+ * bumpMap, emissiveMap } (all in the URANIUM_ATLAS layout).
+ */
+export function makeUraniumRod(opts = {}) {
+  const R = opts.radius ?? 0.68, Hh = opts.height ?? 1.8, front = opts.front ?? 0.53;
+  const key = JSON.stringify([R, Hh, front, opts.band, opts.slots, opts.trefoil, opts.text, opts.seed]);
+  if (uraniumCache.has(key)) return uraniumCache.get(key);
+  const A = URANIUM_ATLAS, W = A.W, H = A.H, S = A.side, N = W * H, seed = opts.seed ?? 235;
+  const pxu = W / (2 * Math.PI * R), pyu = S / Hh, sy = pyu / pxu;
+  const mk = () => {
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const ctx = c.getContext('2d'); ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H); ctx.fillStyle = ctx.strokeStyle = '#fff';
+    return { c, ctx };
+  };
+  const yel = mk(), blk = mk(), slot = mk(), grv = mk(), riv = mk(), glow = mk();
+  const dot = (o, x, y, rx, ry) => { o.ctx.beginPath(); o.ctx.ellipse(x, y, rx, ry, 0, 0, 2 * Math.PI); o.ctx.fill(); };
+  // ---- wall: hazard bands ----
+  const [b0, b1] = opts.band ?? [0.045, 0.2];
+  const bands = [[b0 * S, b1 * S], [S - b1 * S, S - b0 * S]];
+  for (const [y0, y1] of bands) {
+    const h = y1 - y0;
+    blk.ctx.fillRect(0, y0, W, h);
+    yel.ctx.save(); yel.ctx.beginPath(); yel.ctx.rect(0, y0, W, h); yel.ctx.clip();
+    for (let x = -512; x < W + 512; x += 128) {
+      yel.ctx.beginPath(); yel.ctx.moveTo(x, y1); yel.ctx.lineTo(x + 64, y1); yel.ctx.lineTo(x + 64 + h, y0); yel.ctx.lineTo(x + h, y0); yel.ctx.closePath(); yel.ctx.fill();
+    }
+    yel.ctx.restore();
+    grv.ctx.fillRect(0, y0 - 2, W, 4); grv.ctx.fillRect(0, y1 - 2, W, 4);
+    for (let x = 16; x < W; x += 64) for (const yy of [y0 - 13, y1 + 13]) dot(riv, x, yy, 5, 5 * sy);
+  }
+  grv.ctx.fillRect(0, 0, W, 3); grv.ctx.fillRect(0, S - 3, W, 3); // lid edges
+  // ---- wall: panel seams (away from the trefoil) + rivet rows ----
+  const fx = front * W, wrapX = (x) => ((x % W) + W) % W;
+  const top = bands[0][1] + 26, bot = bands[1][0] - 26;
+  for (let k = 1; k < 6; k++) {
+    const x = wrapX(fx + (k / 6) * W);
+    grv.ctx.fillRect(x - 1.5, top, 3, bot - top);
+    for (let y = top + 24; y < bot - 10; y += 58) for (const dx of [-12, 12]) dot(riv, x + dx, y, 4.5, 4.5 * sy);
+  }
+  // ---- wall: cooling / sight slots (both flanks of the trefoil + the back) ----
+  const slots = opts.slots ?? [0.082, 0.102, 0.122];
+  const sl0 = S * 0.3, sl1 = S * 0.7;
+  grv.ctx.lineWidth = 3;
+  for (const base of [fx, wrapX(fx + W / 2)]) for (const d of slots) for (const sg of [-1, 1]) {
+    const x = wrapX(base + sg * d * W);
+    slot.ctx.beginPath(); slot.ctx.roundRect(x - 6, sl0, 12, sl1 - sl0, 6); slot.ctx.fill();
+    grv.ctx.beginPath(); grv.ctx.roundRect(x - 10, sl0 - 4, 20, sl1 - sl0 + 8, 9); grv.ctx.stroke();
+  }
+  // ---- wall: radiation trefoil + marking ----
+  const rT = (opts.trefoil ?? 0.2) * pxu, cyT = S * 0.44;
+  const inT = (ctx, fn) => { ctx.save(); ctx.translate(fx, cyT); ctx.scale(1, sy); fn(ctx); ctx.restore(); };
+  inT(blk.ctx, (c) => { c.beginPath(); c.arc(0, 0, rT * 1.2, 0, 2 * Math.PI); c.fill(); });
+  inT(yel.ctx, (c) => {
+    c.lineWidth = rT * 0.075; c.beginPath(); c.arc(0, 0, rT * 1.13, 0, 2 * Math.PI); c.stroke();
+    c.beginPath(); c.arc(0, 0, rT * 0.17, 0, 2 * Math.PI); c.fill();
+    for (const a of [90, 210, 330]) {
+      const a0 = ((a - 30) * Math.PI) / 180, a1 = ((a + 30) * Math.PI) / 180;
+      c.beginPath(); c.arc(0, 0, rT * 0.98, a0, a1); c.arc(0, 0, rT * 0.3, a1, a0, true); c.closePath(); c.fill();
+    }
+  });
+  inT(grv.ctx, (c) => { c.lineWidth = 3; c.beginPath(); c.arc(0, 0, rT * 1.24, 0, 2 * Math.PI); c.stroke(); });
+  yel.ctx.save(); yel.ctx.translate(fx, cyT + rT * sy * 1.2 + 34); yel.ctx.scale(1, sy);
+  yel.ctx.font = '900 36px "Arial Black", Arial, sans-serif'; yel.ctx.textAlign = 'center'; yel.ctx.textBaseline = 'top';
+  yel.ctx.fillText(opts.text ?? 'U-235 // CORE', 0, 0); yel.ctx.restore();
+  // ---- lids: lathe grooves, bolts, glowing indicator ring ----
+  for (const [cx, cy] of A.caps) {
+    const r = A.capR;
+    for (const f of [0.3, 0.52, 0.86, 0.985]) { grv.ctx.beginPath(); grv.ctx.arc(cx, cy, r * f, 0, 2 * Math.PI); grv.ctx.stroke(); }
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * 2 * Math.PI + Math.PI / 8; dot(riv, cx + Math.cos(a) * r * 0.69, cy + Math.sin(a) * r * 0.69, r * 0.05, r * 0.05); }
+    slot.ctx.lineWidth = r * 0.07; slot.ctx.beginPath(); slot.ctx.arc(cx, cy, r * 0.17, 0, 2 * Math.PI); slot.ctx.stroke();
+    dot(riv, cx, cy, r * 0.08, r * 0.08);
+  }
+  glow.ctx.filter = 'blur(10px)'; glow.ctx.drawImage(slot.c, 0, 0); glow.ctx.filter = 'none';
+  const px = (o) => o.ctx.getImageData(0, 0, W, H).data;
+  const mY = px(yel), mB = px(blk), mS = px(slot), mG = px(grv), mR = px(riv), mL = px(glow);
+  const C = (h) => srgbBytes(h);
+  const t0 = C('#1b2028'), t1 = C('#2d3642'), yc = C('#facc15'), kc = C('#101214'), sc = C('#0c2a08'), rc = C('#4a5563'), gc = C('#39ff14');
+  const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const col = new Uint8ClampedArray(N * 3), orm = new Uint8ClampedArray(N * 3), bump = new Uint8ClampedArray(N), emi = new Uint8ClampedArray(N);
+  for (let y = 0, j = 0; y < H; y++) for (let x = 0; x < W; x++, j++) {
+    const q = j * 4;
+    let br, macro;
+    if (y < S) { // horizontal brushing on the wall (periodic in x -> seamless around the rod)
+      br = 0.6 * vnoise(x / 128, y / 1.3, W / 128, seed, 100000) + 0.4 * vnoise(x / 32, y / 0.7, W / 32, seed + 5, 100000);
+      macro = fbm(x / 256, y / 256, W / 256, seed + 9, 3, 64);
+    } else { // lathe-turned lids: concentric brushing
+      const c = A.caps[x < 512 ? 0 : 1], rr = Math.hypot(x - c[0], y - c[1]), an = Math.atan2(y - c[1], x - c[0]);
+      br = 0.6 * vnoise(rr / 1.2, an * 6, 100000, seed + 1, 100000) + 0.4 * vnoise(rr / 0.6, an * 20, 100000, seed + 3, 100000);
+      macro = 0.5 + 0.2 * Math.sin(rr * 0.05);
+    }
+    const yv = mY[q] / 255, kv = mB[q] / 255, sv = mS[q] / 255, gv = mG[q] / 255, rv = mR[q] / 255, lv = mL[q] / 255;
+    const wear = sstep(0.8, 0.9, fbm(x / 8, y / 8, W / 8, seed + 13, 3, 100000)) * 0.55;
+    const paintY = yv * (1 - wear), paintK = kv * (1 - yv) * (1 - wear * 0.6);
+    let c = mix(t0, t1, clamp(0.25 + 0.55 * br + 0.35 * (macro - 0.5), 0, 1));
+    c = mix(c, kc, paintK);
+    c = mix(c, yc.map((v) => v * (0.9 + 0.12 * macro)), paintY);
+    c = mix(c, rc, rv * 0.65);
+    c = mix(c, sc, sv);
+    c = c.map((v) => v * (1 - 0.6 * gv));
+    col[j * 3] = c[0]; col[j * 3 + 1] = c[1]; col[j * 3 + 2] = c[2];
+    const paint = Math.max(paintY, paintK);
+    let rough = 0.24 + 0.18 * clamp(br * 1.2 - 0.1, 0, 1), metal = 0.72;
+    rough += (0.5 - rough) * paint; metal += (0.08 - metal) * paint;
+    rough += (0.38 - rough) * rv; metal += (0.85 - metal) * rv;
+    rough += (0.3 - rough) * sv; metal *= 1 - sv;
+    rough += (0.65 - rough) * gv;
+    orm[j * 3 + 1] = rough * 255; orm[j * 3 + 2] = metal * 255;
+    bump[j] = clamp(0.55 + 0.06 * (br - 0.5) + 0.035 * paint - 0.4 * gv - 0.35 * sv + 0.28 * rv, 0, 1) * 255;
+    emi[j] = clamp(sv + 0.55 * lv * (1 - sv), 0, 1) * 255;
+  }
+  const map = pixelData(W, H, (x, y) => { const j = (y * W + x) * 3; return [col[j], col[j + 1], col[j + 2]]; });
+  const ormMap = pixelData(W, H, (x, y) => { const j = (y * W + x) * 3; return [0, orm[j + 1], orm[j + 2]]; }, false);
+  const bumpMap = pixelData(W, H, (x, y) => { const v = bump[y * W + x]; return [v, v, v]; }, false);
+  const emissiveMap = pixelData(W, H, (x, y) => { const v = emi[y * W + x] / 255; return [gc[0] * v, gc[1] * v, gc[2] * v]; });
+  for (const t of [map, ormMap, bumpMap, emissiveMap]) t.wrapS = THREE.RepeatWrapping;
+  const out = { map, ormMap, bumpMap, emissiveMap };
+  uraniumCache.set(key, out);
+  return out;
+}

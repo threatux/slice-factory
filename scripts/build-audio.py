@@ -21,6 +21,11 @@ Uses the live samples public/audio/{chop,crackle,whoosh}.wav (soft synthesis onl
     (no sine oscillator, no stone rumble) + snappy plastic click (chop.wav 1.18-1.35x, HP, short tail) + fast hard-plastic
     rattle cascade (crackle.wav band-passed 1.4-5.8 kHz, 1.10-1.35x); slashes = whoosh.wav 1.2-3.0 kHz body + 12-18 ms micro
     click; juicy LEGO-chip clatter R1-R3 / plastic-bead scree R4-R6. PLASTIC branches only: metal / obsidian / earth / ice untouched.
+  * "slizzy_nuclear" (U-235 fuel rod, titanium capsule): massive metal sub = noise through a 72 -> 26 Hz sweeping SVF low-pass
+    (no sine oscillator) + heavy resonant titanium knock (chop.wav 0.86-1.02x) + dry Geiger-like static fission crackle
+    (crackle.wav HP 3.0 kHz, 1.15-1.45x, irregular burst); slashes = ionised energy whoosh (whoosh.wav 500-1800 Hz body) +
+    15-20 ms electric click; ringing-heavy shell-casing / uranium-crystal clatter R1-R3 and scree R4-R6. NUC branches only:
+    the 5 earlier profiles are untouched.
   * --audio-profile (recipe.audioProfile): "obsidian" (default, unchanged) | "metal_crystal" (gold bar / emerald core):
     R1-R2 heavy chop.wav (pitch 0.96-1.08, 120-260 Hz body accent) + dry emerald chip from crackle.wav (15-28 ms, HP 2.4 kHz, -8 dB);
     dense runs crossfade into HP 2.4 kHz crystal crumb (no synthetic sines anywhere); pour R4 pitch 0.98-1.10, R5 pitch 1.22-1.40 + 5-9 kHz accent;
@@ -45,6 +50,7 @@ OBS = False  # True for 'slizzy_obsidian' (volcanic glass + stone timbre of the 
 EARTH = False  # True for 'slizzy_earth' (tectonic planet split + magma)
 ICE = False  # True for 'slizzy_ice' (cryo ice sphere: dry ice block + glassy ice crunch)
 PLASTIC = False  # True for 'slizzy_plastic' (Rubik's cube: hard ABS clicks + LEGO rattle)
+NUC = False  # True for 'slizzy_nuclear' (uranium fuel rod: titanium knock + Geiger crackle)
 
 
 class Mix:
@@ -534,7 +540,68 @@ def plastic_whoosh(rnd, pitch, dur):
     return fade_out(out, min(0.05, dur * 0.3))
 
 
+def nuclear_sub(rnd, dur=0.6, f0=72.0, f1=26.0, decay=0.13):
+    """slizzy_nuclear: massive metal sub punch: white noise through a Chamberlin SVF low-pass whose cutoff sweeps f0 -> f1
+    (exponential), 2 ms attack, long decay. Band-limited noise, not an oscillator: no tonal sine body."""
+    n = int(dur * SR)
+    out, lo, bp = [0.0] * n, 0.0, 0.0
+    q = 1.0 / 1.2
+    for i in range(n):
+        u = i / n
+        fc = f0 * (f1 / f0) ** u
+        f = 2.0 * math.sin(math.pi * fc / SR)
+        hp = rnd.uniform(-1.0, 1.0) - lo - q * bp
+        bp += f * hp
+        lo += f * bp
+        tt = i / SR
+        out[i] = lo * min(1.0, tt / 0.002) * math.exp(-tt / decay)
+    pk = max(1e-9, max(abs(v) for v in out))
+    return fade_out([v / pk for v in out], 0.05)
+
+
+def geiger(rnd, dur=0.02, pitch=(1.15, 1.45)):
+    """slizzy_nuclear: one dry static 'Geiger' click / fission crack (crackle.wav HP 3.0 kHz, pitch 1.15-1.45)."""
+    return fade_out(biquad(crackle(rnd, dur, rnd.uniform(*pitch)), 'hp', 3000.0), min(0.006, dur * 0.4))
+
+
+def geiger_burst(mix, rnd, t, length, rate, gain):
+    """Irregular (exponential-gap) burst of Geiger clicks, rate decaying over `length`."""
+    tau = 0.0
+    while tau < length:
+        env = math.exp(-tau / (length * 0.45))
+        mix.add(t + tau, geiger(rnd, rnd.uniform(0.006, 0.016)), gain * env * rnd.uniform(0.5, 1.0), rnd.uniform(-0.8, 0.8))
+        tau += rnd.expovariate(rate * (0.3 + 0.7 * env))
+
+
+def metal_knock(rnd, pitch=(0.86, 1.02), dur=None, lp=2800.0):
+    """slizzy_nuclear: heavy resonant titanium-capsule knock (chop.wav 0.86-1.02x, LP)."""
+    if not BANK.get('chop'):
+        return geiger(rnd)
+    return biquad(fade_out(play(BANK['chop'], rnd.uniform(*pitch), 0.0, dur), 0.1 if dur is None else dur * 0.4), 'lp', lp)
+
+
+def ion_whoosh(rnd, pitch, dur):
+    """slizzy_nuclear: deep ionised energy whoosh: whoosh.wav 500-1800 Hz body + faint airy top (HP 2.5 kHz)."""
+    x = play(BANK['whoosh'], pitch) if BANK.get('whoosh') else biquad(noise(int(0.6 * SR), rnd), 'lp', 1800.0)
+    body = biquad(biquad(x, 'hp', 500.0), 'lp', 1800.0)
+    top = biquad(x, 'hp', 2500.0)
+    n = min(len(x), int(dur * SR))
+    out = [1.75 * body[i] + 0.25 * top[i] for i in range(n)]
+    return fade_out(out, min(0.06, dur * 0.3))
+
+
+def zap(rnd):
+    """slizzy_nuclear: 15-20 ms electric click (crackle.wav, HP 3.0 kHz)."""
+    return geiger(rnd, rnd.uniform(0.015, 0.02), (1.2, 1.4))
+
+
 def v2_slash(mix, t, inten, rnd):
+    if NUC:
+        mix.add(t - 0.09, ion_whoosh(rnd, rnd.uniform(0.92, 1.04), 0.36), 0.64 * inten, rnd.uniform(-0.3, 0.3))
+        mix.add(t, zap(rnd), 0.42 * inten, rnd.uniform(-0.2, 0.2))
+        mix.add(t + 0.01, zap(rnd), 0.24 * inten, rnd.uniform(-0.4, 0.4))
+        STATS['v2_slash'] = STATS.get('v2_slash', 0) + 1
+        return
     if PLASTIC:
         mix.add(t - 0.08, plastic_whoosh(rnd, rnd.uniform(1.08, 1.2), 0.3), 0.62 * inten, rnd.uniform(-0.3, 0.3))
         mix.add(t, micro_click(rnd), 0.46 * inten, rnd.uniform(-0.2, 0.2))
@@ -568,6 +635,14 @@ def v2_slash(mix, t, inten, rnd):
 
 
 def v2_fan(mix, t, inten, blades, rnd):
+    if NUC:
+        for k, (p, off, pan) in enumerate(((0.88, -0.015, -0.55), (0.98, 0.0, 0.0), (1.08, 0.012, 0.55))):
+            mix.add(t - 0.09 + off, ion_whoosh(rnd, p * rnd.uniform(0.97, 1.03), 0.4), (0.4 if k != 1 else 0.5) * inten, pan)
+        for k in range(3):
+            mix.add(t + 0.011 * k, zap(rnd), 0.3 * inten, rnd.uniform(-0.6, 0.6))
+        mix.add(t - 0.03, air(rnd, 0.38, 2500.0, 8000.0), 0.1 * inten * min(1.0, 0.5 + blades / 16.0), rnd.uniform(-0.2, 0.2))
+        STATS['v2_fan'] = STATS.get('v2_fan', 0) + 1
+        return
     if PLASTIC:
         for k, (p, off, pan) in enumerate(((1.0, -0.014, -0.55), (1.12, 0.0, 0.0), (1.24, 0.011, 0.55))):
             mix.add(t - 0.08 + off, plastic_whoosh(rnd, p * rnd.uniform(0.97, 1.03), 0.34), (0.4 if k != 1 else 0.48) * inten, pan)
@@ -630,6 +705,8 @@ def avalanche(rnd, length, density, fine, glass=False):
             pitch = rnd.uniform(1.08, 1.3)
         if PLASTIC:  # hard ABS / LEGO chips: short, bright, band-passed 1.4-5.8 kHz
             x = band(crackle(rnd, rnd.uniform(0.012, 0.035), rnd.uniform(1.1, 1.35)))
+        elif NUC:  # metal shell casings + uranium crystals: heavier grains with a bright ringing top
+            x = biquad(crackle(rnd, rnd.uniform(0.02, 0.07), rnd.uniform(0.95, 1.3)), 'hp', 1500.0)
         else:
             x = biquad(crackle(rnd, rnd.uniform(0.03, 0.09), pitch), 'hp', 2400.0 if ICE else 1000.0 if EARTH else 2800.0 if glass else 1800.0 if fine else 1200.0)
         put(tau, fade_out(x, 0.01), 0.3 * env * rnd.uniform(0.5, 1.0), rnd.uniform(-0.85, 0.85))
@@ -681,8 +758,41 @@ def v2_impact_plastic(mix, t, tier, rnd, boost):
     return aval
 
 
+def v2_impact_nuclear(mix, t, tier, rnd, boost):
+    """slizzy_nuclear impact: SVF noise sub 72 -> 26 Hz + heavy titanium knock(s) + Geiger fission crackle; R4-R6 add a
+    metal / uranium-crystal avalanche."""
+    mix.add(t, nuclear_sub(rnd, 0.6), (0.95 + 0.08 * min(tier, 4)) * boost)
+    mix.add(t, metal_knock(rnd), 0.85 * boost, -0.15)
+    mix.add(t, geiger(rnd, 0.03), 0.6 * boost)
+    aval = None
+    if tier <= 1:  # two heavy halves: second knock + a short Geiger burst
+        mix.add(t + 0.07, metal_knock(rnd, (0.9, 1.0)), 0.65 * boost, 0.25)
+        geiger_burst(mix, rnd, t + 0.012, 0.5, 40.0, 0.4 * boost)
+    elif tier == 2:  # cascade of knocks + denser crackle
+        for k in range(5):
+            mix.add(t + rnd.uniform(0.03, 0.3), metal_knock(rnd, (0.9, 1.02), 0.12, 3200.0), 0.34 * math.exp(-k / 4.0), rnd.uniform(-0.6, 0.6))
+        geiger_burst(mix, rnd, t + 0.01, 0.7, 70.0, 0.4)
+    else:  # heavy noise boom + wide metal / uranium avalanche + Geiger storm
+        n = int(0.35 * SR)
+        boom = biquad(noise(n, rnd), 'lp', 160.0)
+        for i in range(n):
+            boom[i] *= math.exp(-(i / SR) / 0.1)
+        mix.add(t, boom, 2.0)
+        length = 3.4 if tier >= 4 else 1.9
+        aval = avalanche(rnd, length, 220.0 if tier >= 4 else 140.0, tier >= 4)
+        i0 = int((t + 0.01) * SR)
+        for k in range(min(len(aval[0]), mix.n - i0)):
+            mix.L[i0 + k] += aval[0][k]
+            mix.R[i0 + k] += aval[1][k]
+        geiger_burst(mix, rnd, t + 0.01, 1.2 if tier >= 4 else 0.8, 90.0, 0.3)
+    STATS['v2_impact'] = STATS.get('v2_impact', 0) + 1
+    return aval
+
+
 def v2_impact(mix, t, tier, rnd):
     boost = 10 ** (2.5 / 20) if tier <= 1 else 1.0  # R1 punch: +2.5 dB (master re-normalises to -1.0 dBFS, soft limiter = no clipping)
+    if NUC:
+        return v2_impact_nuclear(mix, t, tier, rnd, boost)
     if PLASTIC:
         return v2_impact_plastic(mix, t, tier, rnd, boost)
     if ICE:  # dense, dry ice-block sub punch
@@ -742,6 +852,19 @@ def v2_impact(mix, t, tier, rnd):
 
 
 def v2_clatter(mix, t, count, inten, rnd, rnd_idx=0):
+    if NUC:
+        if rnd_idx <= 2:  # R1-R3: ringing-heavy titanium shell-casing clatter + a dry Geiger tick
+            for _ in range(min(3, count)):
+                mix.add(t + rnd.uniform(0.0, 0.016), tick(rnd, 0.016, 0.032, 1200.0, (0.92, 1.08)), 0.12 + 0.25 * inten, rnd.uniform(-0.7, 0.7))
+            if inten > 0.35:
+                mix.add(t, metal_knock(rnd, (0.95, 1.1), 0.08, 3000.0), 0.2 * inten, rnd.uniform(-0.5, 0.5))
+            if rnd.random() < 0.4:
+                mix.add(t + rnd.uniform(0.0, 0.03), geiger(rnd, 0.01), 0.12, rnd.uniform(-0.8, 0.8))
+        else:  # R4-R6: bright uranium-crystal / metal-chip scree
+            for _ in range(min(2, count)):
+                mix.add(t + rnd.uniform(0.0, 0.012), tick(rnd, 0.01, 0.024, 2200.0, (1.05, 1.3)), 0.07 + 0.14 * inten, rnd.uniform(-0.8, 0.8))
+        STATS['v2_clatter'] = STATS.get('v2_clatter', 0) + 1
+        return
     if PLASTIC:
         if rnd_idx <= 2:  # R1-R3: juicy LEGO-chip clatter (micro clicks + short snappy chop.wav click)
             for _ in range(min(3, count)):
@@ -852,7 +975,7 @@ def main_v2(events, a):
         elif ty == 'clatter':
             if e.get('round', -1) in (0, 1, 2):
                 v2_clatter(mix, t, int(e.get('count', 1)), inten, rnd, e.get('round', 0))
-            elif (OBS or EARTH or ICE or PLASTIC) and e.get('round', -1) in (3, 4, 5) and rnd.random() < 0.5:
+            elif (OBS or EARTH or ICE or PLASTIC or NUC) and e.get('round', -1) in (3, 4, 5) and rnd.random() < 0.5:
                 v2_clatter(mix, t, int(e.get('count', 1)), inten, rnd, e.get('round', 3))
         elif ty == 'transition':
             v2_whoosh(mix, t, 0.25, 0.32, 1.25, rnd)
@@ -903,14 +1026,15 @@ def main():
     ap.add_argument('--tail', type=float, default=1.0, help='extra seconds after last event')
     ap.add_argument('--duration', type=float, default=None, help='force total length in seconds')
     ap.add_argument('--seed', type=int, default=7)
-    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic'], default='obsidian', help='recipe.audioProfile')
+    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear'], default='obsidian', help='recipe.audioProfile')
     a = ap.parse_args()
-    global PROFILE, OBS, EARTH, ICE, PLASTIC
+    global PROFILE, OBS, EARTH, ICE, PLASTIC, NUC
     PROFILE = a.audio_profile
     OBS = PROFILE == 'slizzy_obsidian'
     EARTH = PROFILE == 'slizzy_earth'
     ICE = PROFILE == 'slizzy_ice'
     PLASTIC = PROFILE == 'slizzy_plastic'
+    NUC = PROFILE == 'slizzy_nuclear'
 
     with open(a.events, encoding='utf-8') as f:
         events = sorted(json.load(f), key=lambda e: e['time'])
@@ -919,7 +1043,7 @@ def main():
         BANK[key] = load_sample(key + '.wav')
     print(f'audio profile: {PROFILE}')
     print('samples: ' + ', '.join(f'{k}={"live " + os.path.basename(v["path"]) if v else "synth fallback"}' for k, v in BANK.items()))
-    if PROFILE in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic'):
+    if PROFILE in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear'):
         mix, total, pauses = main_v2(events, a)
     else:
         total = a.duration if a.duration else (max((e['time'] for e in events), default=0.0) + a.tail + 0.6)
@@ -941,7 +1065,7 @@ def main():
         w = windows.get(e['round'])
         return e.get('phase') == 'pour' or (w is not None and w[0] - 0.05 <= e['time'] <= w[1] + POUR_FADE)
 
-    for e in (events if PROFILE not in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic') else []):
+    for e in (events if PROFILE not in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear') else []):
         t, ty, inten, tool = e['time'], e['type'], float(e.get('intensity', 1.0)), e.get('tool', '')
         if ty == 'drop':
             voice_drop(mix, t, inten, rnd)

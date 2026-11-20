@@ -14,6 +14,9 @@ import { sphereTriangles, sphereCellKeep, clipSphereCell, pieceGeometry } from '
 import { makeLayeredPieceMaterial, makeEarthGrainMaterial, grainLook, grainLookState, crystalGeometry,
   makeCryoPieceMaterial, makeCryoGrainMaterial, cryoGrainLook } from './earth.js';
 import { mulberry32, clamp01 } from '../util.js';
+import { makeUraniumRod } from '../textures.js';
+import { cylinderTriangles, cylinderCellKeep, clipCylinderCell, cylinderPieceGeometry } from './cylinder.js';
+import { makeUraniumPieceMaterial, makeUraniumGrainMaterial, uraniumGrainLook } from './uranium.js';
 
 const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
 const easeInCubic = (u) => u * u * u;
@@ -89,8 +92,17 @@ export async function createDebris({ recipe, profile, scene, G }) {
   const rcfg = { microShell: 0.2, ...(recipe.object.rubiks ?? {}) };
   const rFaceCols = (rcfg.colors ?? ['#0051ba', '#009e49', '#f2f2f5', '#ffd000', '#d90429', '#ff6b00']).map((c) => new THREE.Color(c));
   const rounds = recipe.v2.rounds;
+  const cyl = recipe.object.shape === 'cylinder'; // Uranium rod: clipped cylinder pieces (R1-R3) + layered / skin micro pieces (R4-R6)
+  const ucfg = { slotGlow: 1.4, coreGlow: 1, scatter: 0, ...(recipe.object.uranium ?? {}) };
+  const rod = cyl ? makeUraniumRod({ radius: W / 2, height: H, ...ucfg }) : null;
   let big = null, chunks, grains, chunkCap, grainMat = null;
-  if (sph) {
+  if (cyl) {
+    const gm = (grainMat = makeUraniumGrainMaterial(rod, W / 2, H, ucfg));
+    chunkCap = Math.max(64, ...rounds.filter((r) => (r.tier ?? 1) < 4).map((r) => cylinderCellKeep(r.grid, W / 2, 'center').reduce((a, v) => a + v, 0)));
+    chunks = instanced(chunkGeometry(9, 0.09), gm, chunkCap, true);
+    grains = instanced(new THREE.BoxGeometry(1, 1, 1), gm, profile.maxShards ?? 8000, true);
+    scene.add(chunks, grains);
+  } else if (sph) {
     const gm = (grainMat = cryo ? makeCryoGrainMaterial(W / 2, recipe.object.coreGlow ?? 1) : makeEarthGrainMaterial(W / 2, recipe.object.coreGlow ?? 1));
     chunkCap = Math.max(64, ...rounds.filter((r) => (r.tier ?? 1) < 4).map((r) => sphereCellKeep(r.grid, W / 2, 'center').reduce((a, v) => a + v, 0)));
     chunks = instanced(chunkGeometry(9, 0.09), gm, chunkCap, true);
@@ -116,7 +128,33 @@ export async function createDebris({ recipe, profile, scene, G }) {
   const sphereTris = sph ? sphereTriangles(SR, recipe.object.detail ?? 20) : null;
   const pieceCache = new Map();
   const pieceGroup = new THREE.Group();
-  if (sph) scene.add(pieceGroup);
+  if (sph || cyl) scene.add(pieceGroup);
+  // cylinder mode: same lazily clipped piece sets, cylinder clipper + capsule-skin / fuel-layer material
+  const cylTris = cyl ? cylinderTriangles(W / 2, H, recipe.object.segments ?? 192, recipe.object.rings ?? 25) : null;
+  const cylMat = cyl ? makeUraniumPieceMaterial(rod, W / 2, H, ucfg) : null;
+  const cylinderPieces = (grid) => {
+    const key = grid.join('x');
+    if (pieceCache.has(key)) return pieceCache.get(key);
+    const [nx, ny, nz] = grid, keep = cylinderCellKeep(grid, W / 2, 'volume');
+    const cw = W / nx, ch = H / ny, cd = D / nz, out = [];
+    let i = 0;
+    for (let a = 0; a < nx; a++) for (let b = 0; b < ny; b++) for (let c = 0; c < nz; c++, i++) {
+      if (!keep[i]) continue;
+      const lo = [-W / 2 + a * cw, -H / 2 + b * ch, -D / 2 + c * cd], hi = [lo[0] + cw, lo[1] + ch, lo[2] + cd];
+      const home = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+      const clip = clipCylinderCell(cylTris, W / 2, H, lo, hi);
+      const pg = cylinderPieceGeometry(clip.tris, W / 2, H, home);
+      const mesh = new THREE.Mesh(pg.geometry, cylMat);
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.visible = false;
+      pieceGroup.add(mesh);
+      const hull = new Float32Array(pg.hull.length * 3);
+      pg.hull.forEach((q, k) => hull.set([q[0] * GAP, q[1] * GAP, q[2] * GAP], k * 3));
+      out.push({ mesh, hull, home, centroid: clip.centroid });
+    }
+    pieceCache.set(key, out);
+    return out;
+  };
   /** Clipped pieces of a round grid (cached): [{ mesh, hull (Float32Array, cell-local, shrunk by GAP), home }]. */
   const spherePieces = (grid) => {
     const key = grid.join('x');
@@ -141,7 +179,7 @@ export async function createDebris({ recipe, profile, scene, G }) {
     pieceCache.set(key, out);
     return out;
   };
-  const gls = sph ? grainLookState() : null;
+  const gls = sph ? grainLookState() : cyl ? { color: new THREE.Color(), heat: 0 } : null;
 
   // anomaly gem (palette.ruby, name kept for recipe compatibility): ruby by default; shape "diamond" + gradient = faceted ice diamond
   const rp = { size: 0.2, color: '#8a001c', emissive: '#4a000f', emissiveIntensity: 0.27, shape: 'ruby', roughness: 0.08, clearcoat: 1.0, ior: 1.76,
@@ -170,10 +208,10 @@ export async function createDebris({ recipe, profile, scene, G }) {
     const cw = W / nx, ch = H / ny, cd = D / nz;
     let cells, mesh = null, pieces = null;
     if (R.physics === 'rapier') {
-      pieces = spherePieces(R.grid);
+      pieces = cyl ? cylinderPieces(R.grid) : spherePieces(R.grid);
       cells = pieces.map((p) => p.home);
     } else {
-      const keep = sphereCellKeep(R.grid, SR, 'center');
+      const keep = cyl ? cylinderCellKeep(R.grid, SR, 'center') : sphereCellKeep(R.grid, SR, 'center');
       cells = [];
       let i = 0;
       for (let a = 0; a < nx; a++) for (let b = 0; b < ny; b++) for (let c = 0; c < nz; c++, i++) {
@@ -198,7 +236,8 @@ export async function createDebris({ recipe, profile, scene, G }) {
       for (let i = 0; i < n; i++) {
         const [x, y, z] = cells[i];
         aHome.setXYZ(i, x, y, z);
-        const L = lookFn(Math.hypot(x, y, z) / SR, earth.sample(x, y, z), hash(i * 2.71 + R.index * 5), gls);
+        const L = cyl ? uraniumGrainLook(Math.max(Math.hypot(x, z) / SR, Math.abs(y) / (H / 2) * 0.84 / 0.86), hash(i * 2.71 + R.index * 5), gls)
+          : lookFn(Math.hypot(x, y, z) / SR, earth.sample(x, y, z), hash(i * 2.71 + R.index * 5), gls);
         mesh.setColorAt(i, L.color.multiplyScalar(0.9 + 0.2 * hash(i * 3.1 + 7)));
         aHeat.setX(i, L.heat);
       }
@@ -248,7 +287,7 @@ export async function createDebris({ recipe, profile, scene, G }) {
   }
 
   function buildSet(R, pose, t) {
-    if (sph) return buildSphereSet(R, pose, t);
+    if (sph || cyl) return buildSphereSet(R, pose, t);
     const [nx, ny, nz] = R.grid, n = nx * ny * nz;
     const mesh = n <= 8 ? big : R.tier < 4 && n <= chunkCap ? chunks : grains;
     const cw = W / nx, ch = H / ny, cd = D / nz;
@@ -336,9 +375,10 @@ export async function createDebris({ recipe, profile, scene, G }) {
       const r1 = hash(i * 1.1 + R.index), r2 = hash(i * 2.3 + 5), r3 = hash(i * 3.7 + 9), r4 = hash(i * 5.3 + 13);
       let ang = Math.atan2(hz + (r1 - 0.5) * 0.5, hx + (r2 - 0.5) * 0.5) + (r3 - 0.5) * 0.7;
       if (rubik && rcfg.scatter) ang += (hash(i * 6.1 + 17 + R.index) - 0.5) * 2 * Math.PI * rcfg.scatter; // Rubik: mix the six face colours in the heap
+      if (cyl && ucfg.scatter) ang += (hash(i * 6.1 + 17 + R.index) - 0.5) * 2 * Math.PI * ucfg.scatter; // Uranium: mix shell / graphite / uranium in the heap
       const radial = Math.min(1, Math.hypot(hx / (W / 2), hz / (D / 2)) / 1.41);
       const yN = (hy + H / 2) / H;
-      const s = R.spread * (0.12 + 0.88 * Math.pow(r4, R.pile ? 1.5 : 0.85)) * (0.55 + 0.45 * radial) * (sph ? 0.4 + 0.8 * Math.min(1, Math.hypot(hx, hy, hz) / SR) : 1); // sphere: crust flies wider, the core stays central
+      const s = R.spread * (0.12 + 0.88 * Math.pow(r4, R.pile ? 1.5 : 0.85)) * (0.55 + 0.45 * radial) * (sph ? 0.4 + 0.8 * Math.min(1, Math.hypot(hx, hy, hz) / SR) : cyl ? 0.45 + 0.75 * Math.min(1, Math.hypot(hx, hz) / SR) : 1); // sphere: crust flies wider, the core stays central
       const vw = va.set(Math.cos(ang) * s, (1.2 + 5.5 * r2) * (0.4 + yN), Math.sin(ang) * s * 0.85 + 0.35 * s * 0.2).applyAxisAngle(up, pose.yaw);
       S.vel.set([vw.x, vw.y, vw.z], i * 3);
       const wm = 8 + 18 * r1;

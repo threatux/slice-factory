@@ -39,7 +39,7 @@ export function sphereCellKeep(grid, R, mode = 'center', minFrac = 0.04) {
 }
 
 /** Sutherland-Hodgman: clips polygon pts (array of [x,y,z]) to n·p <= d. Returns { out, hits } (hits = points on the plane). */
-function clipPoly(pts, n, d) {
+export function clipPoly(pts, n, d) {
   const out = [], hits = [];
   const m = pts.length;
   for (let i = 0; i < m; i++) {
@@ -57,7 +57,7 @@ function clipPoly(pts, n, d) {
 }
 
 /** Convex cap polygon on plane (n, d) from its contour points: dedupe, sort by angle around the centroid (CCW seen from +n). */
-function capPolygon(points, n) {
+export function capPolygon(points, n) {
   const seen = new Map(), uniq = [];
   for (const p of points) {
     const k = `${Math.round(p[0] * 1e6)},${Math.round(p[1] * 1e6)},${Math.round(p[2] * 1e6)}`;

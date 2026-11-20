@@ -2,6 +2,7 @@
 // no state, no wall clock. game.js evaluates it at the simulation time t of each fixed step.
 import { clamp01 } from '../util.js';
 import { sphereCellKeep } from './sphere.js';
+import { cylinderCellKeep } from './cylinder.js';
 
 export const AXIS = { x: 0, y: 1, z: 2, d: 3 }; // d = diagonal flourish pass (no seams of its own)
 const easeIO = (u) => 0.5 - 0.5 * Math.cos(Math.PI * clamp01(u)); // samurai stroke: slow-in, very fast middle, slow-out
@@ -33,7 +34,16 @@ export function buildTimelineV2(recipe, profile) {
   const sphere = recipe.object.shape === 'sphere';
   /** Sphere mode: pieces actually kept inside the ball (R1-R3 by volume, micro rounds by cell centre). */
   const sphereCount = (g, physics) => sphereCellKeep(g, W / 2, physics === 'rapier' ? 'volume' : 'center').reduce((s, v) => s + v, 0);
+  const cyl = recipe.object.shape === 'cylinder';
+  /** Cylinder mode: pieces kept inside the rod (R1-R3 by x/z footprint, micro rounds by cell centre). */
+  const cylCount = (g, physics) => cylinderCellKeep(g, W / 2, physics === 'rapier' ? 'volume' : 'center').reduce((s, v) => s + v, 0);
   const fitGrid = (g, physics) => {
+    if (cyl) { // largest uniform shrink whose in-rod piece count fits the instance budget
+      if (cylCount(g, physics) <= budget) return [...g];
+      let k = 1;
+      while (k > 0.2 && cylCount(g.map((v) => Math.max(2, Math.floor(v * k))), physics) > budget) k -= 0.01;
+      return g.map((v) => Math.max(2, Math.floor(v * k)));
+    }
     if (sphere) { // largest uniform shrink whose in-ball piece count fits the instance budget
       if (sphereCount(g, physics) <= budget) return [...g];
       let k = 1;
@@ -99,7 +109,7 @@ export function buildTimelineV2(recipe, profile) {
     };
     R.passes = planPasses(rc.passes, grid, i);
     R.cutEnd = Math.max(...R.passes.map((p) => p.t1));
-    R.count = sphere ? sphereCount(grid, R.physics) : grid[0] * grid[1] * grid[2];
+    R.count = cyl ? cylCount(grid, R.physics) : sphere ? sphereCount(grid, R.physics) : grid[0] * grid[1] * grid[2];
     if (i > 0) ev(R.start, 'transition', { round: i, intensity: 0.7 });
     for (const P of R.passes) {
       const type = P.fan ? 'fan_slash' : 'slash';

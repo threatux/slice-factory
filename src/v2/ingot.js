@@ -5,6 +5,8 @@ import { blockGeometry, addIngotDecals } from '../objects.js';
 import { makeGoldCast, makeIngotDecals, makeVolcanicObsidian, makeEarth, makeCryoIce, makeRubiksFace, makeNeonPrismCap } from '../textures.js';
 import { addRubiksSkin, rubiksUniforms } from '../slabs.js';
 import { makeAtmosphere } from './earth.js';
+import { makeUraniumRod } from '../textures.js';
+import { cylinderTriangles, cylinderPieceGeometry } from './cylinder.js';
 
 /**
  * Seams of axis a sit on the planes p_a = -S_a/2 + k S_a / n_a, k = 1..n_a-1. Seams k < lo are fully lit; lo <= k < hi are lit
@@ -178,7 +180,42 @@ function createRubiks(recipe) {
   return planetApi(frame, mesh, W / 2, null, [], U, seamCfg, [W, H, D]);
 }
 
+/**
+ * Cylinder mode (recipe.object.shape === "cylinder", surfaceStyle "uranium-rod"): vertical fuel rod radius R, height H (size =
+ * [2R, H, 2R]) built from the same closed triangle set that cylinder.js clips (identical skin UVs on the intact rod and on every
+ * piece). Brushed titanium capsule (atlas map + ORM rough/metal + bump), cooling slots / lid ring glow through emissiveMap, the
+ * usual seam pass (object-space planes, no decal geometry -> no Z-fighting).
+ */
+function createCylinder(recipe) {
+  const cfg = recipe.object, pal = recipe.palette;
+  const [W, H] = cfg.size, R = W / 2;
+  const uc = { slotGlow: 1.4, bump: 1.0, clearcoat: 0.25, envMapIntensity: 1.0, ...(cfg.uranium ?? {}) };
+  const seamCfg = { width: 0.024, glow: 2.4, flash: 5, ...(recipe.v2.seam ?? {}) };
+  const [c1, c2] = pal.seam ?? ['#ffffff', pal.core];
+  const rod = makeUraniumRod({ radius: R, height: H, ...uc });
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, map: rod.map, roughnessMap: rod.ormMap, metalnessMap: rod.ormMap, roughness: 1, metalness: 1,
+    bumpMap: rod.bumpMap, bumpScale: uc.bump, clearcoat: uc.clearcoat, clearcoatRoughness: 0.3, envMapIntensity: uc.envMapIntensity,
+    emissive: 0xffffff, emissiveMap: rod.emissiveMap, emissiveIntensity: uc.slotGlow,
+  });
+  const U = {
+    uSN: { value: new THREE.Vector3(1, 1, 1) }, uSLo: { value: new THREE.Vector3(1, 1, 1) }, uSHi: { value: new THREE.Vector3(1, 1, 1) },
+    uSRev: { value: new THREE.Vector3() }, uSFlash: { value: new THREE.Vector3() }, uSW: { value: new THREE.Vector3(0.02, 0.02, 0.02) },
+    uHalf: { value: new THREE.Vector3(R, H / 2, R) },
+    uSCol: { value: new THREE.Color(c1) }, uSCol2: { value: new THREE.Color(c2) },
+    uSGlow: { value: seamCfg.glow }, uSFl: { value: seamCfg.flash }, uSAlpha: { value: 1 },
+  };
+  addSeams(mat, U);
+  const geo = cylinderPieceGeometry(cylinderTriangles(R, H, cfg.segments ?? 192, cfg.rings ?? 25), R, H).geometry;
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = mesh.receiveShadow = true;
+  const frame = new THREE.Group();
+  frame.add(mesh);
+  return planetApi(frame, mesh, R, null, [], U, seamCfg, [W, H, W]);
+}
+
 export function createIngot(recipe) {
+  if (recipe.object.shape === 'cylinder') return createCylinder(recipe);
   if (recipe.object.shape === 'sphere') return createPlanet(recipe);
   if (recipe.object.surfaceStyle === 'rubiks') return createRubiks(recipe);
   const cfg = recipe.object, pal = recipe.palette;

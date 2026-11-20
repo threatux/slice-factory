@@ -32,9 +32,14 @@ export function createFx({ recipe, profile, scene, tl }) {
   const sph = recipe.object.shape === 'sphere', SRr = half[0];
   const shell = (p, k) => { let o = 0; for (let i = 0; i < 3; i++) if (i !== k) o += p[i] * p[i]; p[k] = (p[k] / half[k]) * Math.sqrt(Math.max(0, SRr * SRr - o)); return p; };
   const bottomY = (x, z) => (sph ? -Math.sqrt(Math.max(0, SRr * SRr - x * x - z * z)) : -half[1]);
+  // cylinder mode: blade-edge points are moved onto the rod wall (x/z circle), lids stay flat
+  const cyl = recipe.object.shape === 'cylinder';
+  const disc = (p, k = 0.999) => { const q = Math.hypot(p[0], p[2]) / (SRr * k); if (q > 1) { p[0] /= q; p[2] /= q; } return p; };
+  const wall = (p, k) => { const o = k === 0 ? p[2] : p[0]; p[k] = (Math.sign(p[k]) || 1) * Math.sqrt(Math.max(0, SRr * SRr - o * o)); return p; };
   const edgePoint = (P, c, r) => {
     const E = edgePointBox(P, c, r);
     if (sph) shell(E.p, P.axis === 1 || P.axis === 2 ? 0 : 2);
+    if (cyl) { if (P.axis === 0) wall(E.p, 2); else if (P.axis === 2) wall(E.p, 0); else disc(E.p); }
     return E;
   };
   const edgePointBox = (P, c, r) => {
@@ -80,6 +85,7 @@ export function createFx({ recipe, profile, scene, tl }) {
         const tb = a + (b - a) * rnd();
         const lp = [(rnd() * 2 - 1) * half[0] * 0.95, -half[1] + 0.01, (rnd() * 2 - 1) * half[2] * 0.95];
         if (sph) { const q = Math.hypot(lp[0], lp[2]) / (SRr * 0.95); if (q > 1) { lp[0] /= q; lp[2] /= q; } lp[1] = bottomY(lp[0], lp[2]) + 0.01; }
+        if (cyl) disc(lp, 0.95);
         if (k % 3 === 0) sparks.push({ tb, p: toWorld(lp, tb), v: [(rnd() - 0.5) * 0.6, -0.4 - rnd(), (rnd() - 0.5) * 0.6], life: 0.5 + 0.4 * rnd(), size: 0.01 + 0.01 * rnd(), hot: 0.3 + 0.7 * rnd(), gold: true });
         else crumbs.push({ tb, p: toWorld(lp, tb), v: [(rnd() - 0.5) * 0.5, -0.2 * rnd(), (rnd() - 0.5) * 0.5], life: Math.max(0.6, R.dropStart + 0.25 - tb), size: 0.012 + 0.016 * rnd(), tint: rnd() });
       }
@@ -111,6 +117,7 @@ export function createFx({ recipe, profile, scene, tl }) {
     const h = (k) => hash(i * 7.31 + k * 1.913 + 0.5);
     const p0 = [(h(1) * 2 - 1) * half[0], h(2) * H, (h(3) * 2 - 1) * half[2]];
     if (sph) { const q = Math.hypot(p0[0], p0[1] - SRr, p0[2]) / SRr; if (q > 1) { p0[0] /= q; p0[1] = SRr + (p0[1] - SRr) / q; p0[2] /= q; } }
+    if (cyl) disc(p0, 1);
     const phi = Math.atan2(p0[2] + (h(4) - 0.5) * 0.6, p0[0] + (h(5) - 0.5) * 0.6) + (h(6) - 0.5) * 0.9;
     let rf = 0.6 + 2.7 * Math.pow(h(7), 0.8); // -25% reach vs the flat-carpet version
     const cx = Math.cos(phi), cz = Math.sin(phi);
@@ -126,6 +133,7 @@ export function createFx({ recipe, profile, scene, tl }) {
       tgt: [(h(14) * 2 - 1) * half[0] * 0.9, tl.Y0 + (h(15) * 2 - 1) * half[1] * 0.9, (h(16) * 2 - 1) * half[2] * 0.9], d: 0.3 * h(17),
     });
     if (sph) { const g = D6[D6.length - 1], q = Math.hypot(g.tgt[0], g.tgt[1] - tl.Y0, g.tgt[2]) / (SRr * 0.9); if (q > 1) { g.tgt[0] /= q; g.tgt[1] = tl.Y0 + (g.tgt[1] - tl.Y0) / q; g.tgt[2] /= q; } }
+    if (cyl) disc(D6[D6.length - 1].tgt, 0.9);
   }
   /** Avalanche position of grain g at tau after the R6 impact (pure). */
   const dustAt = (g, tau, out) => {
