@@ -368,6 +368,209 @@ def voice_whoosh(mix, t, dur, inten, rnd):
         mix.add(t, [x[i] * math.sin(math.pi * i / n) ** 2 * 2.0 for i in range(n)], 0.22 * inten)
 
 
+
+# ---- v2.0 "slizzy_metal" voices (levitate -> slash -> silence -> impact_shatter -> rewind) -----------------------------
+# No synthetic tonal bells, no chainsaw: blades = whoosh.wav (HP 1.2 kHz) + 15-25 ms crackle.wav crystal tick;
+# fans = 3 layered whooshes + airy band noise; impacts = 85 -> 28 Hz sub punch + tiered shatter layers; finale = reversed
+# avalanche + reversed whoosh that lands exactly on the loop point.
+def hp_whoosh(rnd, pitch, dur):
+    x = play(BANK['whoosh'], pitch) if BANK.get('whoosh') else biquad(noise(int(0.6 * SR), rnd), 'lp', 1800.0)
+    x = biquad(x, 'hp', 1200.0)
+    x = x[:int(dur * SR)]
+    return fade_out(x, min(0.06, dur * 0.3))
+
+
+def tick(rnd, lo=0.015, hi=0.025, hp=2400.0, pitch=(1.15, 1.35)):
+    return fade_out(biquad(crackle(rnd, rnd.uniform(lo, hi), rnd.uniform(*pitch)), 'hp', hp), 0.005)
+
+
+def air(rnd, dur, f_hp=4000.0, f_lp=10000.0, attack=0.03):
+    n = int(dur * SR)
+    x = biquad(biquad(noise(n, rnd), 'hp', f_hp, 0.7), 'lp', f_lp, 0.7)
+    for i in range(n):
+        u = i / SR
+        x[i] *= min(1.0, u / attack) * math.exp(-max(0.0, u - attack) / (dur * 0.35))
+    return x
+
+
+def v2_slash(mix, t, inten, rnd):
+    mix.add(t - 0.09, hp_whoosh(rnd, rnd.uniform(1.15, 1.3), 0.32), 0.62 * inten, rnd.uniform(-0.3, 0.3))
+    mix.add(t, tick(rnd), 0.55 * inten, rnd.uniform(-0.2, 0.2))
+    if BANK.get('chop'):  # metallic "shink" transient: ultra-short, high-passed (no tonal body)
+        sh = biquad(play(BANK['chop'], 1.6, 0.0, 0.03), 'hp', 3000.0)
+        mix.add(t + 0.002, fade_out(sh, 0.01), 0.3 * inten)
+    STATS['v2_slash'] = STATS.get('v2_slash', 0) + 1
+
+
+def v2_fan(mix, t, inten, blades, rnd):
+    for k, (p, off, pan) in enumerate(((1.0, -0.015, -0.55), (1.15, 0.0, 0.0), (1.3, 0.012, 0.55))):
+        mix.add(t - 0.09 + off, hp_whoosh(rnd, p * rnd.uniform(0.97, 1.03), 0.36), (0.42 if k != 1 else 0.5) * inten, pan)
+    for k in range(3):
+        mix.add(t + 0.012 * k, tick(rnd), 0.38 * inten, rnd.uniform(-0.6, 0.6))
+    mix.add(t - 0.03, air(rnd, 0.38), 0.2 * inten * min(1.0, 0.5 + blades / 16.0), rnd.uniform(-0.2, 0.2))
+    STATS['v2_fan'] = STATS.get('v2_fan', 0) + 1
+
+
+def avalanche(rnd, length, density, fine):
+    """Stereo ASMR cascade of crystal grains + silky metal-powder bed. Returns (L, R)."""
+    n = int(length * SR) + int(0.2 * SR)
+    L, R = [0.0] * n, [0.0] * n
+
+    def put(off, x, g, pan):
+        i0 = int(off * SR)
+        a = (max(-1.0, min(1.0, pan)) + 1.0) * math.pi / 4.0
+        gl, gr = math.cos(a) * g, math.sin(a) * g
+        for k in range(min(len(x), n - i0)):
+            L[i0 + k] += x[k] * gl
+            R[i0 + k] += x[k] * gr
+    tau = 0.0
+    while tau < length:
+        env = math.exp(-tau / (length * 0.38))
+        pitch = rnd.uniform(1.1, 1.4) if fine else rnd.uniform(0.95, 1.25)
+        x = biquad(crackle(rnd, rnd.uniform(0.03, 0.09), pitch), 'hp', 1800.0 if fine else 1200.0)
+        put(tau, fade_out(x, 0.01), 0.3 * env * rnd.uniform(0.5, 1.0), rnd.uniform(-0.85, 0.85))
+        STATS['v2_grains'] = STATS.get('v2_grains', 0) + 1
+        tau += rnd.uniform(0.5, 1.5) / (density * (0.25 + 0.75 * env))
+    bed = biquad(biquad(noise(int(length * SR), rnd), 'hp', 3000.0, 0.7), 'lp', 9000.0, 0.7)
+    bed2 = biquad(biquad(noise(int(length * SR), rnd), 'hp', 3000.0, 0.7), 'lp', 9000.0, 0.7)
+    for i in range(len(bed)):
+        u = i / SR
+        e = min(1.0, u / 0.02) * math.exp(-u / (length * 0.32)) * 0.11
+        L[i] += bed[i] * e
+        R[i] += bed2[i] * e
+    return L, R
+
+
+def v2_impact(mix, t, tier, rnd):
+    boost = 10 ** (2.5 / 20) if tier <= 1 else 1.0  # R1 punch: +2.5 dB (master re-normalises to -1.0 dBFS, soft limiter = no clipping)
+    mix.add(t, sweep_sine(85.0, 28.0, 0.55, rate=5.0, decay=6.0), (0.9 + 0.1 * min(tier, 4)) * boost)
+    chop = BANK.get('chop')
+    aval = None
+    if tier <= 1:  # two heavy dull chop.wav knocks (halves) + dry crystal crunch from crackle.wav; no tonal synthesis
+        if chop:
+            mix.add(t, biquad(fade_out(play(chop, rnd.uniform(0.85, 0.9)), 0.1), 'lp', 2200.0), 0.85 * boost, -0.2)
+            mix.add(t + 0.070, biquad(fade_out(play(chop, rnd.uniform(0.93, 0.98)), 0.1), 'lp', 2200.0), 0.65 * boost, 0.25)
+            # extra attack: 9 ms bright chop.wav transient (HP 900 Hz) on the very first sample of the hit
+            mix.add(t, biquad(fade_out(play(chop, 1.25, 0.0, 0.009), 0.004), 'hp', 900.0), 0.55 * boost)
+        mix.add(t, fade_out(biquad(crackle(rnd, 0.035, 1.0), 'hp', 2200.0), 0.012), 0.55 * boost)
+    elif tier == 2:  # dense sub + cascade of real chop.wav hits (pitch 0.95-1.20) + decaying crackle.wav scatter
+        if chop:
+            mix.add(t, biquad(fade_out(play(chop, 0.95), 0.1), 'lp', 3000.0), 0.8)
+            for k in range(5):
+                mix.add(t + rnd.uniform(0.03, 0.3), biquad(fade_out(play(chop, rnd.uniform(0.95, 1.2), 0.0, 0.12), 0.05), 'lp', 3200.0),
+                        0.34 * math.exp(-k / 4.0), rnd.uniform(-0.6, 0.6))
+        dt = 0.0
+        for k in range(16):
+            dt += rnd.uniform(0.01, 0.06) * (1 + k * 0.12)
+            mix.add(t + dt, fade_out(biquad(crackle(rnd, rnd.uniform(0.02, 0.045), rnd.uniform(0.95, 1.1)), 'hp', 1800.0), 0.01),
+                    0.5 * math.exp(-dt / 0.4), rnd.uniform(-0.75, 0.75))
+    else:  # mighty bass hit + wide rustling avalanche of crystals and metal powder
+        n = int(0.35 * SR)
+        boom = biquad(noise(n, rnd), 'lp', 180.0)
+        for i in range(n):
+            boom[i] *= math.exp(-(i / SR) / 0.09)
+        mix.add(t, boom, 2.2)
+        if chop:
+            mix.add(t, biquad(fade_out(play(chop, 0.7), 0.08), 'lp', 2000.0), 0.6)
+        length = 3.4 if tier >= 4 else 1.9
+        aval = avalanche(rnd, length, 220.0 if tier >= 4 else 140.0, tier >= 4)
+        i0 = int((t + 0.01) * SR)
+        for k in range(min(len(aval[0]), mix.n - i0)):
+            mix.L[i0 + k] += aval[0][k]
+            mix.R[i0 + k] += aval[1][k]
+    STATS['v2_impact'] = STATS.get('v2_impact', 0) + 1
+    return aval
+
+
+def v2_clatter(mix, t, count, inten, rnd):
+    for _ in range(min(3, count)):
+        mix.add(t + rnd.uniform(0.0, 0.016), tick(rnd, 0.015, 0.03, 1500.0, (0.95, 1.05)), (0.1 + 0.22 * inten), rnd.uniform(-0.7, 0.7))
+    if inten > 0.5 and BANK.get('chop'):
+        mix.add(t, biquad(fade_out(play(BANK['chop'], rnd.uniform(0.9, 1.05), 0.0, 0.08), 0.03), 'lp', 2000.0), 0.15 * inten, rnd.uniform(-0.5, 0.5))
+    STATS['v2_clatter'] = STATS.get('v2_clatter', 0) + 1
+
+
+def v2_whoosh(mix, t, dur, gain, pitch, rnd):
+    x = play(BANK['whoosh'], pitch) if BANK.get('whoosh') else biquad(noise(int(dur * SR), rnd), 'lp', 900.0)
+    x = x[:int(dur * SR)]
+    n = len(x)
+    for i in range(n):
+        x[i] *= min(1.0, i / (0.02 * SR)) * min(1.0, (n - i) / (0.06 * SR))
+    mix.add(t, x, gain, rnd.uniform(-0.3, 0.3))
+
+
+def v2_rewind(mix, t0, t1, aval, rnd):
+    """Reversed avalanche (its loud head lands on t1) + two reversed rising whooshes ending exactly at t1 (= loop point 0.0 s)."""
+    n = int((t1 - t0) * SR)
+    i1 = int(t1 * SR)
+    if aval:
+        seg_l, seg_r = aval[0][:n], aval[1][:n]
+        m = len(seg_l)
+        for k in range(m):
+            g = 0.25 + 0.75 * (k / max(1, m)) ** 2.2
+            j = i1 - m + k
+            if 0 <= j < mix.n:
+                mix.L[j] += seg_l[m - 1 - k] * g * 0.9
+                mix.R[j] += seg_r[m - 1 - k] * g * 0.9
+    if BANK.get('whoosh'):
+        for p, g in ((0.62, 0.55), (0.95, 0.45)):
+            x = biquad(play(BANK['whoosh'], p), 'hp', 300.0)[::-1]
+            mix.add(t1 - len(x) / SR, x, g, 0.0)
+    STATS['v2_rewind'] = 1
+
+
+def gate(mix, a, b, fade=0.03):
+    """Pure silence in [a + fade, b): tension pause before the impact."""
+    ia, ib, nf = int(a * SR), int(b * SR), int(fade * SR)
+    for i in range(max(0, ia), min(mix.n, ib)):
+        k = i - ia
+        g = 0.0 if k >= nf else 0.5 + 0.5 * math.cos(math.pi * k / nf)
+        mix.L[i] *= g
+        mix.R[i] *= g
+
+
+def main_v2(events, a):
+    rnd = random.Random(a.seed)
+    end = next((e['time'] for e in events if e['type'] == 'end'), max(e['time'] for e in events) + 1.0)
+    total = a.duration if a.duration else end
+    mix = Mix(total)
+    aval_last = None
+    pauses = []
+    for e in events:
+        t, ty, inten = e['time'], e['type'], float(e.get('intensity', 1.0))
+        if ty == 'slash':
+            v2_slash(mix, t, inten, rnd)
+        elif ty == 'fan_slash':
+            v2_fan(mix, t, inten, int(e.get('blades', 8)), rnd)
+        elif ty == 'impact_shatter':
+            av = v2_impact(mix, t, int(e.get('tier', 1)), rnd)
+            if av:
+                aval_last = av
+        elif ty == 'clatter':
+            if e.get('round', -1) in (0, 1, 2):
+                v2_clatter(mix, t, int(e.get('count', 1)), inten, rnd)
+        elif ty == 'transition':
+            v2_whoosh(mix, t, 0.25, 0.32, 1.25, rnd)
+        elif ty == 'whip':
+            v2_whoosh(mix, t - 0.05, 0.45, 0.5, 1.0, rnd)
+        elif ty == 'tension_pause':
+            pauses.append((t, float(e['until'])))
+        elif ty == 'rewind':
+            v2_rewind(mix, t, min(total, float(e['until'])), aval_last, rnd)
+    for a0, b0 in pauses:
+        gate(mix, a0, b0)
+    # loop seam: 10 ms fade-in at 0 and 15 ms fade-out at the end (no click when the Short loops)
+    for i in range(int(0.01 * SR)):
+        g = i / (0.01 * SR)
+        mix.L[i] *= g
+        mix.R[i] *= g
+    nf = int(0.015 * SR)
+    for i in range(nf):
+        g = i / nf
+        mix.L[mix.n - 1 - i] *= g
+        mix.R[mix.n - 1 - i] *= g
+    return mix, total, pauses
+
 # ---- mastering -------------------------------------------------------------------------------------
 def master(mix):
     """Soft limiter (tanh above knee) then peak-normalise to PEAK_DBFS."""
@@ -395,7 +598,7 @@ def main():
     ap.add_argument('--tail', type=float, default=1.0, help='extra seconds after last event')
     ap.add_argument('--duration', type=float, default=None, help='force total length in seconds')
     ap.add_argument('--seed', type=int, default=7)
-    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal'], default='obsidian', help='recipe.audioProfile')
+    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal'], default='obsidian', help='recipe.audioProfile')
     a = ap.parse_args()
     global PROFILE
     PROFILE = a.audio_profile
@@ -407,8 +610,11 @@ def main():
         BANK[key] = load_sample(key + '.wav')
     print(f'audio profile: {PROFILE}')
     print('samples: ' + ', '.join(f'{k}={"live " + os.path.basename(v["path"]) if v else "synth fallback"}' for k, v in BANK.items()))
-    total = a.duration if a.duration else (max((e['time'] for e in events), default=0.0) + a.tail + 0.6)
-    mix = Mix(total)
+    if PROFILE == 'slizzy_metal':
+        mix, total, pauses = main_v2(events, a)
+    else:
+        total = a.duration if a.duration else (max((e['time'] for e in events), default=0.0) + a.tail + 0.6)
+        mix = Mix(total)
 
     # pour windows (chop.wav disabled inside) and per-round chop times (for dt-adaptive envelopes)
     windows, opened = {}, {}
@@ -426,7 +632,7 @@ def main():
         w = windows.get(e['round'])
         return e.get('phase') == 'pour' or (w is not None and w[0] - 0.05 <= e['time'] <= w[1] + POUR_FADE)
 
-    for e in events:
+    for e in (events if PROFILE != 'slizzy_metal' else []):
         t, ty, inten, tool = e['time'], e['type'], float(e.get('intensity', 1.0)), e.get('tool', '')
         if ty == 'drop':
             voice_drop(mix, t, inten, rnd)

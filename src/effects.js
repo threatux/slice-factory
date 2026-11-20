@@ -75,7 +75,7 @@ function dustGeometry(rings, segs, seed) {
 }
 
 /** Points with per-particle size/colour/alpha (screen-size attenuated). */
-function pointCloud(count, blending, map, pxScale) {
+export function pointCloud(count, blending, map, pxScale) {
   const geo = new THREE.BufferGeometry();
   const pos = new Float32Array(count * 3), col = new Float32Array(count * 4), size = new Float32Array(count);
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));

@@ -61,7 +61,7 @@ totalEmissiveRadiance += uKerfColor * (kCore * uKerfGlow + kNew * uKerfFlash);`)
  * grooves, normal-map relief (tangent axes passed as view-space varyings) and a faint emerald glow inside the cracks.
  * Top face: u = x, v = -z; +x face: u = -z, v = y. Nothing is drawn on other faces.
  */
-function addIngotDecals(mat, U) {
+export function addIngotDecals(mat, U) {
   const prev = mat.onBeforeCompile, prevKey = mat.customProgramCacheKey.bind(mat);
   mat.onBeforeCompile = (sh, r) => {
     prev(sh, r);
@@ -105,7 +105,7 @@ totalEmissiveRadiance += uDGlowCol * dM.b * uDGlow;`);
  * gets shallow planar flake facets (≤ amp, inward only, fading to 0 before the bevel so the cut cap still fits).
  * UVs: box projection in world units (1 tile = 1.5 units) with per-face offsets so the fracture network never repeats on adjacent faces.
  */
-function blockGeometry(W, H, D, r, seed = 17, amp = 0.006) {
+export function blockGeometry(W, H, D, r, seed = 17, amp = 0.006) {
   const half = [W / 2, H / 2, D / 2];
   const rnd = mulberry32(seed);
   const FACES = [
@@ -317,7 +317,7 @@ export async function createBlock(cfg, pal) {
 }
 
 // ---- knife ------------------------------------------------------------------------------------
-const GRIND = 0.115; // fraction of blade height taken by the cutting bevel (this band glows on hot tools)
+export const GRIND = 0.115; // fraction of blade height taken by the cutting bevel (this band glows on hot tools)
 
 /** Santoku profile. x: heel -> tip, edge on y = 0 (flat across the block), sheep's-foot spine dropping to the tip. */
 function bladeProfile(BL, BH) {
@@ -335,7 +335,7 @@ function bladeProfile(BL, BH) {
  * Blade as a parametric solid: flat hollow-free body + separate ground bevel patch (crisp grind line),
  * distal taper toward the tip, chamfered spine. UV: u along the blade, v edge (0) -> spine (1).
  */
-function bladeGeometry(BL, BH, T) {
+export function bladeGeometry(BL, BH, T) {
   const P = bladeProfile(BL, BH);
   const NU = 72;
   const us = Array.from({ length: NU + 1 }, (_, i) => i / NU);
@@ -386,7 +386,7 @@ function bladeGeometry(BL, BH, T) {
 }
 
 /** Additive glow strip hugging the (curved) cutting edge on both faces. */
-function edgeStripGeometry(P, T, height) {
+export function edgeStripGeometry(P, T, height) {
   const pos = [], uv = [], idx = [], N = 60;
   for (const side of [1, -1]) {
     const base = pos.length / 3;
