@@ -7,6 +7,7 @@ export function createHud(profile, recipe) {
   stage.style.height = profile.height + 'px';
   stage.style.setProperty('--h', profile.height + 'px');
   stage.style.setProperty('--accent', recipe.palette.accent);
+  if (recipe.palette.accent2) stage.style.setProperty('--accent2', recipe.palette.accent2); // optional 2nd accent (progress-bar gradient)
   const $ = (id) => document.getElementById(id);
   const hud = $('hud'), tool = $('tool'), roundTag = $('round'), cuts = $('v-cuts'), of = $('v-of');
   const pieces = $('v-pieces'), size = $('v-size'), title = $('title');
@@ -15,6 +16,14 @@ export function createHud(profile, recipe) {
   $('t-main').textContent = lines[0];
   $('t-line2').textContent = lines[1] ?? '';
   $('t-sub').textContent = recipe.subtitle ?? '';
+  // Long titles ("24K GOLD BAR") shrink to fit the frame; titles that already fit (e.g. "OBSIDIAN") are left untouched.
+  const fitLine = (el, basePx) => {
+    const r = document.createRange(); r.selectNodeContents(el);
+    const w = r.getBoundingClientRect().width, max = profile.width * 0.88;
+    if (w > max) el.style.fontSize = (basePx * max / w).toFixed(2) + 'px';
+  };
+  fitLine($('t-main'), profile.height * 0.068);
+  fitLine($('t-line2'), profile.height * 0.03);
 
   const segs = $('segs');
   segs.innerHTML = '';

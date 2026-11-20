@@ -19,7 +19,7 @@
     #segs { display: flex; gap: 1.6%; }
     .seg { flex: 1; }
     .seg .bar { height: calc(var(--h) * .0065); background: rgba(255,255,255,.14); overflow: hidden; }
-    .seg i { display: block; height: 100%; background: var(--accent); transform-origin: left; transform: scaleX(0); }
+    .seg i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2, var(--accent))); transform-origin: left; transform: scaleX(0); }
     .seg span { display: block; margin-top: calc(var(--h) * .006); font-size: calc(var(--h) * .0165); letter-spacing: .08em; color: var(--dim); }
     .seg span.on { color: var(--ink); }
     .row { display: flex; justify-content: space-between; align-items: center; margin-top: calc(var(--h) * .012); }

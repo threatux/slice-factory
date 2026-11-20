@@ -7,8 +7,8 @@ import { createPile, createStream, createSparks, createSweeper, createGoldGlow }
 import { createHud } from './hud.js';
 import { createEventLog } from './audio.js';
 import { buildTimeline } from './timeline.js';
-import { planSlabs, slabCells, makeShardGeometry, makeShardMaterial } from './slabs.js';
-import { makeObsidian, makeCap } from './textures.js';
+import { planSlabs, slabCells, makeShardGeometry, makeShardMaterial, SHARD_LOOKS } from './slabs.js';
+import { makeObsidian, makeCap, makeGoldCast, makeEmeraldCap, makeRubyCap } from './textures.js';
 import { mulberry32, clamp01, lerp, smooth } from './util.js';
 
 const PUNCH = [0.055, 0.022, 0.008, 0, 0]; // damped vertical camera punch per cut, by round (heavy R1 hits)
@@ -37,12 +37,14 @@ export async function createGame(profile, recipe, opts = {}) {
   const log = createEventLog(timeline.events);
   const totalRounds = recipe.rounds.length;
 
-  const { renderer, scene, camera, knifeLight } = createScene(profile, pal);
+  const matLook = recipe.object.material ?? 'obsidian'; // 'obsidian' (default) | 'gold-emerald'
+  const { renderer, scene, camera, knifeLight } = createScene(profile, pal, recipe.scene);
   const hud = createHud(profile, recipe);
-  const obs = makeObsidian(pal);
+  const obs = matLook === 'gold-emerald' ? makeGoldCast(pal) : makeObsidian(pal);
   const physics = await createPhysics({
     maxCubes: profile.maxCubes, maxInstances: Math.round(profile.maxCubes * 2.5), scene, table: LAYOUT.table.size,
-    geometry: makeShardGeometry(), material: makeShardMaterial(obs, makeCap(pal, W / H)),
+    geometry: makeShardGeometry(),
+    material: makeShardMaterial(obs, matLook === 'gold-emerald' ? makeEmeraldCap(pal, W / H) : makeCap(pal, W / H), matLook === 'gold-emerald' ? { ...SHARD_LOOKS[matLook], ruby: makeRubyCap(pal, W / H) } : SHARD_LOOKS[matLook]),
   });
   const block = await createBlock(recipe.object, pal);
   scene.add(block.group, block.capGroup);
@@ -50,8 +52,8 @@ export async function createGame(profile, recipe, opts = {}) {
   scene.add(knife.group, knife.light, ...knife.ghosts);
   const pxScale = profile.height / (2 * Math.tan(THREE.MathUtils.degToRad(LAYOUT.camera.fov / 2)));
   const piles = {
-    gravel: createPile({ pal, kind: 'gravel', chunks: Math.round(Math.min(900, profile.maxCubes * 1.5)), pxScale }),
-    sand: createPile({ pal, kind: 'sand', seed: 9, pxScale }),
+    gravel: createPile({ pal, look: matLook, kind: 'gravel', chunks: Math.round(Math.min(900, profile.maxCubes * 1.5)), pxScale }),
+    sand: createPile({ pal, look: matLook, kind: 'sand', seed: 9, pxScale }),
   };
   const stream = createStream({ count: Math.round(Math.min(6000, Math.max(1600, profile.maxCubes * 4.5))), pal, pxScale });
   const sparks = createSparks({ pal, pxScale });

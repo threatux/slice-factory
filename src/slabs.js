@@ -95,29 +95,48 @@ export function makeShardGeometry(seed = 4) {
  * dark cooling crust + a glowing crack network, hotter toward the face centre and for core pieces (aHeat).
  * aHeat < 0 marks the gold ingot (polished metal).
  */
-export function makeShardMaterial(obs, cap) {
+export function makeShardMaterial(obs, cap, look = {}) {
+  // defaults = obsidian look (identical shading to the original shader); other recipes override through SHARD_LOOKS
+  const o = {
+    metalness: 0.05, innerMetal: 0.05, innerRough: 0.6, innerEmi: [0.25, 1.1], normalScale: 0.5, clearcoat: 0.9,
+    anomMetal: 1.0, anomRough: 0.22, anomEmi: 0.18, anomAlbedo: 1.0, anomCoat: null, ruby: null, rim: 0, rimColor: '#ffffff', sampLo: 0, sampHi: 1, key: 'obsidian', ...look,
+  };
   const mat = new THREE.MeshPhysicalMaterial({
-    color: 0xffffff, map: obs.map, normalMap: obs.normalMap, normalScale: new THREE.Vector2(0.5, 0.5),
-    roughnessMap: obs.roughnessMap, roughness: 1, metalness: 0.05, clearcoat: 0.9, clearcoatRoughness: 0.06, envMapIntensity: 1.5,
+    color: 0xffffff, map: obs.map, normalMap: obs.normalMap, normalScale: new THREE.Vector2(o.normalScale, o.normalScale),
+    roughnessMap: obs.roughnessMap, roughness: 1, metalness: o.metalness, clearcoat: o.clearcoat, clearcoatRoughness: 0.06, envMapIntensity: 1.5,
   });
-  const uniforms = { uCapMap: { value: cap.map }, uCapEmi: { value: cap.emissive } };
+  const uniforms = {
+    uCapMap: { value: cap.map }, uCapEmi: { value: cap.emissive },
+    uInnerMetal: { value: o.innerMetal }, uInnerRough: { value: o.innerRough }, uInnerEmi: { value: new THREE.Vector2(...o.innerEmi) },
+    uAnomAlbedo: { value: o.anomAlbedo }, uAnomCoat: { value: o.anomCoat ?? o.clearcoat },
+    uUseRuby: { value: o.ruby ? 1 : 0 }, uRubyMap: { value: o.ruby?.map ?? cap.map }, uRubyEmi: { value: o.ruby?.emissive ?? cap.emissive }, uRubyN: { value: o.ruby?.normal ?? cap.map }, uAnomMetal: { value: o.anomMetal }, uAnomRough: { value: o.anomRough }, uAnomEmi: { value: o.anomEmi },
+    uRim: { value: o.rim }, uRimCol: { value: new THREE.Color(o.rimColor) }, uSamp: { value: new THREE.Vector2(o.sampLo, o.sampHi) },
+  };
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
 attribute vec3 aOutP; attribute vec3 aOutN; attribute float aHeat;
-varying vec3 vSP; varying vec3 vSN; varying vec3 vOutP; varying vec3 vOutN; varying float vHeat; varying vec2 vSeed;`)
+varying vec3 vSP; varying vec3 vSN; varying vec3 vOutP; varying vec3 vOutN; varying float vHeat; varying vec2 vSeed; varying vec3 vSEx; varying vec3 vSEy; varying vec3 vSEz;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
 vSP = position; vSN = normal; vOutP = aOutP; vOutN = aOutN; vHeat = aHeat;
 #ifdef USE_INSTANCING
 vSeed = fract(sin(vec2(float(gl_InstanceID) * 12.9898, float(gl_InstanceID) * 78.233)) * 43758.5453);
 #else
 vSeed = vec2(0.0);
-#endif`);
+#endif
+#ifdef USE_INSTANCING
+mat3 sMV = mat3(modelViewMatrix * instanceMatrix);
+#else
+mat3 sMV = mat3(modelViewMatrix);
+#endif
+vSEx = normalize(sMV * vec3(1.0, 0.0, 0.0)); vSEy = normalize(sMV * vec3(0.0, 1.0, 0.0)); vSEz = normalize(sMV * vec3(0.0, 0.0, 1.0));`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
 uniform sampler2D uCapMap, uCapEmi;
-varying vec3 vSP; varying vec3 vSN; varying vec3 vOutP; varying vec3 vOutN; varying float vHeat; varying vec2 vSeed;`)
+uniform sampler2D uRubyMap, uRubyEmi, uRubyN; uniform float uUseRuby, uAnomCoat;
+uniform float uAnomAlbedo, uInnerMetal, uInnerRough, uAnomMetal, uAnomRough, uAnomEmi, uRim; uniform vec2 uInnerEmi, uSamp; uniform vec3 uRimCol;
+varying vec3 vSP; varying vec3 vSN; varying vec3 vOutP; varying vec3 vOutN; varying float vHeat; varying vec2 vSeed; varying vec3 vSEx; varying vec3 vSEy; varying vec3 vSEz;`)
       .replace('#include <map_fragment>', `#include <map_fragment>
 vec3 sa = abs(vSN);
 float sOuter; vec2 sFc;
@@ -127,30 +146,58 @@ else { sOuter = vSN.z > 0.0 ? vOutP.z : vOutN.z; sFc = vSP.xy; }
 float sGold = step(vHeat, -0.5);
 float sInner = (1.0 - sOuter) * (1.0 - sGold);
 float sC = clamp(1.0 - 2.0 * max(abs(sFc.x), abs(sFc.y)), 0.0, 1.0);
-vec2 sUv = vec2(0.18, 0.18) + vSeed * 0.5 + (sFc + 0.5) * 0.32 + sN(sa) ;
+vec2 sUv = clamp(vec2(0.18, 0.18) + vSeed * 0.5 + (sFc + 0.5) * 0.32 + sN(sa), vec2(uSamp.x), vec2(uSamp.y));
 vec3 sCapCol = texture2D(uCapMap, sUv).rgb;
 vec3 sCapEmi = texture2D(uCapEmi, sUv).rgb;
 diffuseColor.rgb = mix(diffuseColor.rgb, sCapCol, sInner);
+float sRim = sInner * (1.0 - smoothstep(uRim * 0.55, uRim, 0.5 - max(abs(sFc.x), abs(sFc.y)))) * step(0.001, uRim);
+diffuseColor.rgb = mix(diffuseColor.rgb, uRimCol, sRim);
 #if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
-diffuseColor.rgb = mix(diffuseColor.rgb, vColor.rgb, sGold);
+diffuseColor.rgb = mix(diffuseColor.rgb, mix(vColor.rgb * uAnomAlbedo, texture2D(uRubyMap, sUv).rgb, uUseRuby), sGold);
 #endif`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-roughnessFactor = mix(roughnessFactor, 0.6, sInner);
-roughnessFactor = mix(roughnessFactor, 0.22, sGold);`)
+roughnessFactor = mix(roughnessFactor, uInnerRough, sInner);
+roughnessFactor = mix(roughnessFactor, 0.26, sRim);
+roughnessFactor = mix(roughnessFactor, uAnomRough, sGold);`)
       .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
-metalnessFactor = mix(metalnessFactor, 1.0, sGold);`)
+metalnessFactor = mix(metalnessFactor, uInnerMetal, sInner);
+metalnessFactor = mix(metalnessFactor, 0.96, sRim);
+metalnessFactor = mix(metalnessFactor, uAnomMetal, sGold);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+{
+  vec3 sEu, sEv;
+  if (sa.x >= sa.y && sa.x >= sa.z) { sEu = vSEz; sEv = vSEy; } else if (sa.y >= sa.z) { sEu = vSEx; sEv = vSEz; } else { sEu = vSEx; sEv = vSEy; }
+  vec2 sRt = texture2D(uRubyN, sUv).xy * 2.0 - 1.0;
+  normal = normalize(normal + sGold * uUseRuby * 0.9 * (sRt.x * sEu + sRt.y * sEv));
+}`)
+      .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
+#ifdef USE_CLEARCOAT
+material.clearcoat = mix(material.clearcoat, uAnomCoat, sGold);
+#endif`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 {
   float heat = clamp(vHeat, 0.0, 1.0) * (0.55 + 0.45 * smoothstep(0.0, 0.7, sC));
-  totalEmissiveRadiance += sInner * sCapEmi * (0.25 + 1.1 * heat);
+  totalEmissiveRadiance += sInner * (1.0 - sRim) * sCapEmi * (uInnerEmi.x + uInnerEmi.y * heat);
 #if defined( USE_COLOR ) || defined( USE_INSTANCING_COLOR )
-  totalEmissiveRadiance += sGold * vColor.rgb * 0.18;
+  totalEmissiveRadiance += sGold * mix(vColor.rgb, texture2D(uRubyEmi, sUv).rgb, uUseRuby) * uAnomEmi;
 #endif
 }`);
     // per-axis offset so the three face orientations of one piece show different parts of the section
     sh.fragmentShader = sh.fragmentShader.replace('uniform sampler2D uCapMap, uCapEmi;',
       'uniform sampler2D uCapMap, uCapEmi;\nvec2 sN(vec3 a) { return a.x >= a.y && a.x >= a.z ? vec2(0.11, 0.07) : a.y >= a.z ? vec2(0.05, 0.13) : vec2(0.0); }');
   };
-  mat.customProgramCacheKey = () => 'shard-v3';
+  mat.customProgramCacheKey = () => 'shard-v4';
   return mat;
 }
+
+/**
+ * Per-look overrides for makeShardMaterial (selected by recipe.object.material; obsidian = defaults).
+ * gold-emerald: cast-gold skin (metal), glossy dielectric emerald fracture faces with a thin gold rim,
+ * and the anomaly cube is a glowing ruby (instance colour = palette.gold).
+ */
+export const SHARD_LOOKS = {
+  'gold-emerald': {
+    key: 'gold-emerald', metalness: 0.96, innerMetal: 0.0, innerRough: 0.16, innerEmi: [0.18, 0.45], normalScale: 0.6, clearcoat: 0.35,
+    anomMetal: 0.05, anomRough: 0.11, anomEmi: 0.7, anomAlbedo: 1.0, anomCoat: 1.0, rim: 0.05, rimColor: '#f4c430', sampLo: 0.12, sampHi: 0.88,
+  },
+};

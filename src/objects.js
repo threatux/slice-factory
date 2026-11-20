@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {
   makeObsidian, makeCap, makeDamascus, makeEdgeMask, makeCarbon, makeGlowTexture, makeEdgeGradient,
+  makeGoldCast, makeIngotDecals, makeEmeraldCap,
 } from './textures.js';
 import { LAYOUT } from './config.js';
 import { clamp01, mulberry32 } from './util.js';
@@ -56,11 +57,55 @@ totalEmissiveRadiance += uKerfColor * (kCore * uKerfGlow + kNew * uKerfFlash);`)
 }
 
 /**
+ * Object-space decals for the gold ingot (top stamp + hairline cracks), layered on top of addKerfs(): albedo darkening in the
+ * grooves, normal-map relief (tangent axes passed as view-space varyings) and a faint emerald glow inside the cracks.
+ * Top face: u = x, v = -z; +x face: u = -z, v = y. Nothing is drawn on other faces.
+ */
+function addIngotDecals(mat, U) {
+  const prev = mat.onBeforeCompile, prevKey = mat.customProgramCacheKey.bind(mat);
+  mat.onBeforeCompile = (sh, r) => {
+    prev(sh, r);
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vDP; varying vec3 vDN; varying vec3 vDEx; varying vec3 vDEy; varying vec3 vDEz;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+vDP = position; vDN = normal;
+mat3 dMV = mat3(modelViewMatrix);
+vDEx = normalize(dMV * vec3(1.0, 0.0, 0.0)); vDEy = normalize(dMV * vec3(0.0, 1.0, 0.0)); vDEz = normalize(dMV * vec3(0.0, 0.0, 1.0));`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec3 vDP; varying vec3 vDN; varying vec3 vDEx; varying vec3 vDEy; varying vec3 vDEz;
+uniform sampler2D uDTopN, uDTopM, uDSideN, uDSideM;
+uniform vec3 uDSize; uniform vec3 uDGlowCol; uniform float uDGlow, uDStr;`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+float dTop = smoothstep(0.9, 0.97, vDN.y);
+float dSide = smoothstep(0.9, 0.97, vDN.x);
+vec2 dUvT = vec2(vDP.x / uDSize.x + 0.5, 0.5 - vDP.z / uDSize.z);
+vec2 dUvS = vec2(0.5 - vDP.z / uDSize.z, vDP.y / uDSize.y + 0.5);
+vec3 dM = texture2D(uDTopM, dUvT).rgb * dTop + texture2D(uDSideM, dUvS).rgb * dSide;
+diffuseColor.rgb *= 1.0 - 0.72 * dM.r - 0.7 * dM.g;`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+roughnessFactor = mix(roughnessFactor, 0.5, clamp(0.7 * dM.r + dM.g, 0.0, 1.0));`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+{
+  vec2 dtT = texture2D(uDTopN, dUvT).xy * 2.0 - 1.0;
+  vec2 dtS = texture2D(uDSideN, dUvS).xy * 2.0 - 1.0;
+  vec3 dn = dTop * (dtT.x * vDEx - dtT.y * vDEz) + dSide * (-dtS.x * vDEz + dtS.y * vDEy);
+  normal = normalize(normal + dn * uDStr);
+}`)
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+totalEmissiveRadiance += uDGlowCol * dM.b * uDGlow;`);
+  };
+  mat.customProgramCacheKey = () => prevKey() + '+ingot-decals-v1';
+}
+
+/**
  * Chamfered, lightly flaked block: every face is a dense grid mapped onto a rounded box (radius r); the flat interior
  * gets shallow planar flake facets (≤ amp, inward only, fading to 0 before the bevel so the cut cap still fits).
  * UVs: box projection in world units (1 tile = 1.5 units) with per-face offsets so the fracture network never repeats on adjacent faces.
  */
-function blockGeometry(W, H, D, r, seed = 17) {
+function blockGeometry(W, H, D, r, seed = 17, amp = 0.006) {
   const half = [W / 2, H / 2, D / 2];
   const rnd = mulberry32(seed);
   const FACES = [
@@ -76,7 +121,7 @@ function blockGeometry(W, H, D, r, seed = 17) {
     for (let i = nb - 1; i >= 0; i--) a.push(h - (r * i) / nb);
     return a;
   };
-  const amp = 0.006, fadeW = 0.07;
+  const fadeW = 0.07;
   const pos = [], nrm = [], uv = [], idx = [], fixedN = [];
   const q = [0, 0, 0], inner = [0, 0, 0];
   FACES.forEach((F) => {
@@ -154,12 +199,28 @@ export async function createBlock(cfg, pal) {
     uHalfD: { value: D / 2 }, uHalfH: { value: H / 2 }, uKerfFlash: { value: 0 }, uKerfCutY: { value: 0 },
     uKerfColor: { value: new THREE.Color(pal.core) },
   };
-  let kerfTotal = 1, shellMat = null;
+  let kerfTotal = 1, shellMat = null, decal = null;
 
   if (cfg.type === 'glb') {
     const root = await loadGlb(cfg.glb);
     root.traverse((o) => { if (o.isMesh) [].concat(o.material).forEach((m) => clipMats.push(m)); });
     group.add(root);
+  } else if (cfg.material === 'gold-emerald') {
+    const gc = makeGoldCast(pal), rel = cfg.relief ?? 1, dec = makeIngotDecals([W, H, D]);
+    shellMat = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff, map: gc.map, normalMap: gc.normalMap, normalScale: new THREE.Vector2(0.5, 0.5).multiplyScalar(rel),
+      roughnessMap: gc.roughnessMap, roughness: 1, metalness: 0.96, clearcoat: 0.35, clearcoatRoughness: 0.12,
+    });
+    addKerfs(shellMat, kerf);
+    decal = {
+      uDTopN: { value: dec.top.normal }, uDTopM: { value: dec.top.mask }, uDSideN: { value: dec.side.normal }, uDSideM: { value: dec.side.mask },
+      uDSize: { value: new THREE.Vector3(W, H, D) }, uDGlowCol: { value: new THREE.Color(pal.core) }, uDGlow: { value: 0.5 }, uDStr: { value: 1.0 },
+    };
+    addIngotDecals(shellMat, decal);
+    const mesh = new THREE.Mesh(blockGeometry(W, H, D, bevel, 17, cfg.flake ?? 0.006), shellMat);
+    mesh.castShadow = mesh.receiveShadow = true;
+    group.add(mesh);
+    clipMats.push(shellMat);
   } else {
     const obs = makeObsidian(pal);
     const rel = cfg.relief ?? 1;
@@ -179,11 +240,13 @@ export async function createBlock(cfg, pal) {
   for (const m of clipMats) { m.clippingPlanes = [clip]; m.clipShadows = true; }
 
   // Cross-section cap: rounded face just in front of the clipping plane. No shadow receiving (prevents acne/grid on the face).
-  const capTex = makeCap(pal, W / H);
-  const capMat = new THREE.MeshStandardMaterial({
-    map: capTex.map, roughnessMap: capTex.roughness, roughness: 1, metalness: 0.05,
+  const capTex = cfg.material === 'gold-emerald' ? makeEmeraldCap(pal, W / H) : makeCap(pal, W / H);
+  const capParams = {
+    map: capTex.map, roughnessMap: capTex.roughness, roughness: 1, metalness: capTex.metal ? 1 : 0.05,
     emissive: 0xffffff, emissiveMap: capTex.emissive, emissiveIntensity: 1.2,
-  });
+  };
+  const capMat = capTex.metal ? new THREE.MeshPhysicalMaterial({ ...capParams, metalnessMap: capTex.metal, specularIntensity: 0.5 }) // gold rim metallic, crystal dielectric with tamed reflections
+    : new THREE.MeshStandardMaterial(capParams);
   const cap = new THREE.Mesh(capGeometry(W, H, bevel), capMat);
   cap.visible = false;
   const glowTex = makeGlowTexture();
@@ -196,6 +259,7 @@ export async function createBlock(cfg, pal) {
   const coreLight = new THREE.PointLight(pal.core, 0, 3.4, 2);
   capGroup.add(coreLight);
   let depthHeat = 1;
+  const glow = { cap: 1, light: 1, halo: 1, ...(cfg.glow ?? {}) }; // recipe.object.glow: scales cap emissive / core light / halo (default 1 = unchanged)
 
   return {
     group, capGroup, coreLight, size: [W, H, D],
@@ -230,12 +294,13 @@ export async function createBlock(cfg, pal) {
     },
     setHeat(h, t) {
       const flick = 0.94 + 0.06 * Math.sin(t * 9) + 0.03 * Math.sin(t * 23);
-      capMat.emissiveIntensity = (0.8 + 1.4 * h) * flick * (0.7 + 0.3 * depthHeat);
-      coreGlow.material.opacity = (0.1 + 0.18 * h) * flick;
-      coreLight.intensity = cap.visible ? (1.5 + 6 * h) * flick : 0;
+      capMat.emissiveIntensity = (0.8 + 1.4 * h) * flick * (0.7 + 0.3 * depthHeat) * glow.cap;
+      coreGlow.material.opacity = (0.1 + 0.18 * h) * flick * glow.halo;
+      coreLight.intensity = cap.visible ? (1.5 + 6 * h) * flick * glow.light : 0;
       kerf.uKerfGlow.value = (2.6 / Math.sqrt(kerfTotal)) * flick;
       // fracture cores barely smoulder: slow breathing, independent of cutting
       if (shellMat) shellMat.emissiveIntensity = (0.7 + 0.5 * h) * (0.7 + 0.3 * Math.sin(t * 2.1)) * flick;
+      if (decal) decal.uDGlow.value = (0.35 + 0.3 * h) * (0.8 + 0.2 * Math.sin(t * 1.7)); // emerald light inside the hairline cracks
     },
     reset() {
       kerf.uKerfCount.value = 0; kerf.uKerfCutY.value = 0; kerf.uKerfFlash.value = 0; kerfTotal = 1;

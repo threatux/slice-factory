@@ -1,7 +1,7 @@
 // Non-physical visual effects: growing gravel/dust cones, pour stream, cut sparks, sweeper bar (+ swept wave), gold-cube glow.
 import * as THREE from 'three';
 import { mulberry32, clamp01 } from './util.js';
-import { makeGlowTexture, makeGravel, makeSand } from './textures.js';
+import { makeGlowTexture, makeGravel, makeSand, makeGoldGravel, makeGoldDust } from './textures.js';
 
 const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
 const BAR_HALF = 0.03; // sweeper bar half thickness (x): front face = barX + BAR_HALF
@@ -105,7 +105,8 @@ function pointCloud(count, blending, map, pxScale) {
  * hundreds of tiny smouldering magma specks in its lower/middle part (R5). Lit warm by its own glow + a clean white top rim.
  * Volume ∝ progress, so scale ∝ progress^(1/3). The sweeper erases it with a clip plane (x >= bar front).
  */
-export function createPile({ pal, kind = 'gravel', center = [0.3, 0, 1.3], radius = 0.62, height = 0.72, chunks = 500, seed = 5, pxScale = 1000 }) {
+export function createPile({ pal, kind = 'gravel', look = 'obsidian', center = [0.3, 0, 1.3], radius = 0.62, height = 0.72, chunks = 500, seed = 5, pxScale = 1000 }) {
+  const G = look === 'gold-emerald'; // gold shavings (R4) / gold micro-dust with emerald specks (R5)
   const group = new THREE.Group();
   group.position.set(center[0], center[1], center[2]);
   const body = new THREE.Group();
@@ -113,14 +114,14 @@ export function createPile({ pal, kind = 'gravel', center = [0.3, 0, 1.3], radiu
   group.add(body);
   const sweepPlane = new THREE.Plane(new THREE.Vector3(1, 0, 0), 100); // keeps x >= -constant
   const clipped = [];
-  let mat, emissiveMat = null, warm = null, rimTop = null, specks = null, grainEmbers = null, lobe = () => 1;
+  let mat, emissiveMat = null, warm = null, warm2 = null, rimTop = null, specks = null, grainEmbers = null, lobe = () => 1;
   const profile = kind === 'sand' ? dustF : coneF;
 
   if (kind === 'sand') {
-    const t = makeSand();
+    const t = G ? makeGoldDust(pal) : makeSand();
     for (const m of [t.map, t.roughness, t.normalMap]) m.repeat.set(10, 10);
     mat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(1.25, 1.25, 1.3), map: t.map, roughnessMap: t.roughness, roughness: 1, metalness: 0.12,
+      color: G ? new THREE.Color(0.55, 0.42, 0.18) : new THREE.Color(1.25, 1.25, 1.3), map: t.map, roughnessMap: t.roughness, roughness: 1, metalness: G ? 0.85 : 0.12,
       normalMap: t.normalMap, normalScale: new THREE.Vector2(0.7, 0.7), envMapIntensity: 1.3, vertexColors: true, alphaHash: true,
     });
     const dg = dustGeometry(110, 220, seed);
@@ -131,18 +132,18 @@ export function createPile({ pal, kind = 'gravel', center = [0.3, 0, 1.3], radiu
     clipped.push(mat);
 
     // micro-grains scattered around the toe (group space, isotropic), denser close to the heap
-    const rnd = mulberry32(seed + 7), NG = 1100, NE = 90;
+    const rnd = mulberry32(seed + 7), NG = 1100, NE = G ? 1100 : 90;
     const ggeo = new THREE.IcosahedronGeometry(1, 0);
-    const gmat = new THREE.MeshPhysicalMaterial({ color: 0x34343c, roughness: 0.25, metalness: 0.1, clearcoat: 1, clearcoatRoughness: 0.05, flatShading: true });
+    const gmat = new THREE.MeshPhysicalMaterial({ color: G ? 0xd9a82a : 0x34343c, roughness: G ? 0.3 : 0.25, metalness: G ? 0.9 : 0.1, clearcoat: G ? 0.2 : 1, clearcoatRoughness: 0.05, flatShading: true });
     const emat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
     const grains = new THREE.InstancedMesh(ggeo, gmat, NG);
     grainEmbers = new THREE.InstancedMesh(ggeo, emat, NE);
     grains.receiveShadow = true;
     const m4 = new THREE.Matrix4(), qq = new THREE.Quaternion(), e = new THREE.Euler(), c = new THREE.Color();
-    const hot = new THREE.Color('#ffc46a'), magma = new THREE.Color(pal.magma);
+    const hot = new THREE.Color(G ? '#b9ffdf' : '#ffc46a'), magma = new THREE.Color(pal.magma); // gold: emerald crumbs glow toward mint
     for (let i = 0; i < NG + NE; i++) {
       const a = rnd() * Math.PI * 2, rho = 0.94 + Math.min(0.55, -Math.log(1 - rnd() * 0.97) * 0.15);
-      const r = rho * lobe(a) * radius, s = (i < NG ? 0.0035 + rnd() * 0.0075 : 0.0025 + rnd() * 0.003);
+      const r = rho * lobe(a) * radius, s = (i < NG ? 0.0035 + rnd() * 0.0075 : G ? 0.005 + rnd() * 0.006 : 0.0025 + rnd() * 0.003);
       const y = profile(rho) * height + s * 0.4;
       qq.setFromEuler(e.set(rnd() * 6, rnd() * 6, rnd() * 6));
       m4.compose(new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r), qq, new THREE.Vector3(s, s * (0.6 + rnd() * 0.5), s));
@@ -153,30 +154,35 @@ export function createPile({ pal, kind = 'gravel', center = [0.3, 0, 1.3], radiu
     clipped.push(gmat, emat);
 
     // surface sparkle: smouldering magma specks mixed into the lower & middle part + cold glints of glass dust, twinkling
-    const NS = 760, glint = new THREE.Color('#e8f0ff');
+    const NS = G ? 3000 : 760, glint = new THREE.Color(G ? '#fff0b8' : '#e8f0ff');
     specks = pointCloud(NS, THREE.AdditiveBlending, makeGlowTexture(), pxScale);
     specks.data = Array.from({ length: NS }, (_, i) => {
-      const ember = i < NS * 0.6;
+      const ember = i < NS * (G ? 0.6 : 0.6);
       const a = rnd() * Math.PI * 2, rho = ember ? 0.3 + 0.75 * Math.sqrt(rnd()) : 0.05 + 0.9 * Math.sqrt(rnd());
       const r = rho * lobe(a) * radius, y = profile(rho) * height + 0.005;
-      const col = ember ? new THREE.Color(pal.magma).lerp(hot, rnd() * 0.8).multiplyScalar(1.1 + rnd() * 0.9) : glint.clone().multiplyScalar(0.7 + rnd() * 0.6);
-      return { x: Math.cos(a) * r, y, z: Math.sin(a) * r, col, size: ember ? 0.011 + rnd() * 0.013 : 0.008 + rnd() * 0.01, w: ember ? 1.5 + rnd() * 4 : 6 + rnd() * 14, p: rnd() * 6.28, ember };
+      const col = ember ? new THREE.Color(pal.magma).lerp(hot, rnd() * 0.8).multiplyScalar(G ? 1.6 + rnd() * 1.2 : 1.1 + rnd() * 0.9) : glint.clone().multiplyScalar(G ? 1.0 + rnd() * 0.9 : 0.7 + rnd() * 0.6);
+      return { x: Math.cos(a) * r, y, z: Math.sin(a) * r, col, size: ember ? (G ? 0.016 + rnd() * 0.016 : 0.011 + rnd() * 0.013) : 0.008 + rnd() * 0.01, w: ember ? 1.5 + rnd() * 4 : (G ? 8 + rnd() * 22 : 6 + rnd() * 14), p: rnd() * 6.28, ember };
     });
     specks.data.forEach((d, i) => { specks.pos.set([d.x, d.y, d.z], i * 3); specks.size[i] = d.size; });
     group.add(specks.pts);
 
     // warm glow from the dust itself (low, front) + clean white lab rim from above/behind
-    warm = new THREE.PointLight(pal.magma, 0, 1.3, 2); // diffuse warmth from inside the toe, no hot spot
+    warm = new THREE.PointLight(G ? '#ffc94d' : pal.magma, 0, 1.3, 2); // diffuse warmth from inside the toe, no hot spot
     warm.position.set(radius * 0.15, 0.22, radius * 0.35);
+    if (G) { // gold dust: second, emerald light from below-behind (gold/emerald under-glow)
+      warm2 = new THREE.PointLight('#00e676', 0, 1.3, 2);
+      warm2.position.set(-radius * 0.2, 0.16, radius * 0.1);
+      group.add(warm2);
+    }
     rimTop = new THREE.SpotLight(0xf3f6ff, 0, 7, 0.5, 0.65, 1.6);
     rimTop.position.set(-0.6, 2.9, -1.5);
     rimTop.target.position.set(0, height * 0.4, 0);
     group.add(warm, rimTop, rimTop.target);
   } else {
-    const t = makeGravel(pal);
-    for (const m of [t.map, t.roughness, t.normalMap, t.emissive]) m.repeat.set(2.2, 2.2);
+    const t = G ? makeGoldGravel(pal) : makeGravel(pal);
+    for (const m of [t.map, t.roughness, t.normalMap, t.emissive, t.metal]) m?.repeat.set(2.2, 2.2);
     mat = new THREE.MeshStandardMaterial({
-      color: 0xffffff, map: t.map, roughnessMap: t.roughness, roughness: 1, metalness: 0.2, normalMap: t.normalMap,
+      color: 0xffffff, map: t.map, roughnessMap: t.roughness, roughness: 1, metalness: G ? 1 : 0.2, metalnessMap: t.metal ?? null, normalMap: t.normalMap,
       normalScale: new THREE.Vector2(1.6, 1.6), emissive: 0xffffff, emissiveMap: t.emissive, emissiveIntensity: 1.3, flatShading: true,
     });
     emissiveMat = mat;
@@ -191,8 +197,8 @@ export function createPile({ pal, kind = 'gravel', center = [0.3, 0, 1.3], radiu
   if (kind === 'gravel' && chunks > 0) {
     const rnd = mulberry32(seed + 1);
     const geo = new THREE.IcosahedronGeometry(1, 0);
-    const nE = Math.round(chunks * 0.06), nS = chunks - nE;
-    const smat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.3, metalness: 0.15, clearcoat: 0.7, flatShading: true });
+    const nE = Math.round(chunks * (G ? 0.2 : 0.06)), nS = chunks - nE;
+    const smat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: G ? 0.28 : 0.3, metalness: G ? 0.92 : 0.15, clearcoat: G ? 0.2 : 0.7, flatShading: true });
     const stones = new THREE.InstancedMesh(geo, smat, nS);
     emberMat = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
     const embers = new THREE.InstancedMesh(geo, emberMat, nE);
@@ -205,8 +211,8 @@ export function createPile({ pal, kind = 'gravel', center = [0.3, 0, 1.3], radiu
       // stones live in body space (non-uniform scale), so pre-compensate to keep them roughly isotropic
       q.setFromEuler(e.set(rnd() * 6, rnd() * 6, rnd() * 6));
       m4.compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(s / radius, (s / height) * (0.6 + rnd() * 0.5), s / radius));
-      if (isE) { embers.setMatrixAt(i - nS, m4); embers.setColorAt(i - nS, col.set(pal.magma).lerp(new THREE.Color('#ffd27a'), rnd() * 0.6)); }
-      else { stones.setMatrixAt(i, m4); stones.setColorAt(i, col.set(pal.crumb).multiplyScalar(0.5 + rnd() * 1.4)); }
+      if (isE) { embers.setMatrixAt(i - nS, m4); embers.setColorAt(i - nS, G ? col.set('#00e676').lerp(new THREE.Color('#b9ffdf'), rnd() * 0.55) : col.set(pal.magma).lerp(new THREE.Color('#ffd27a'), rnd() * 0.6)); }
+      else { stones.setMatrixAt(i, m4); stones.setColorAt(i, G ? col.set(pal.shell).multiplyScalar(0.55 + rnd() * 0.7) : col.set(pal.crumb).multiplyScalar(0.5 + rnd() * 1.4)); }
     }
     body.add(stones, embers);
     clipped.push(smat, emberMat);
@@ -231,13 +237,14 @@ export function createPile({ pal, kind = 'gravel', center = [0.3, 0, 1.3], radiu
       if (emberMat) emberMat.color.setScalar(1.1 + 0.35 * Math.sin(time * 7));
       if (warm) {
         const p = clamp01(progress), left = clamp01((center[0] + radius * s - front) / (2 * radius * Math.max(s, 1e-3)));
-        warm.intensity = 0.8 * p * f * left;
-        rimTop.intensity = 26 * p * left;
+        warm.intensity = (G ? 0.6 : 0.8) * p * f * left;
+        if (warm2) warm2.intensity = 2.6 * p * f * left;
+        rimTop.intensity = (G ? 8 : 26) * p * left;
         grainEmbers.material.color.setScalar(1.0 + 0.4 * Math.sin(time * 5.3));
         specks.data.forEach((d, i) => {
           const tw = 0.55 + 0.45 * Math.sin(time * d.w + d.p);
           const gone = center[0] + d.x * s < front;
-          specks.col.set([d.col.r, d.col.g, d.col.b, gone ? 0 : (d.ember ? 0.9 * tw : tw ** 6) * clamp01(p * 3)], i * 4);
+          specks.col.set([d.col.r, d.col.g, d.col.b, gone ? 0 : (d.ember ? 0.9 * tw : tw ** (G ? 4 : 6)) * clamp01(p * 3)], i * 4);
         });
         specks.dirty();
       }
@@ -268,7 +275,8 @@ export function createStream({ count, pal, pxScale, seed = 11 }) {
   group.add(dark.pts, glow.pts);
   const life = Float32Array.from({ length: count }, () => 0.32 + rnd() * 0.3);
   const off = Float32Array.from({ length: count }, () => rnd());
-  const magma = new THREE.Color(pal.magma), hot = new THREE.Color('#ffd27a'), white = new THREE.Color('#fff2dc'), crumb = new THREE.Color(pal.crumb), c = new THREE.Color();
+  const pg = pal.pourGlow ?? [pal.magma, '#ffd27a', '#fff2dc'];
+  const magma = new THREE.Color(pg[0]), hot = new THREE.Color(pg[1]), white = new THREE.Color(pg[2]), crumb = new THREE.Color(pal.crumb), c = new THREE.Color();
   const G = 7.5;
   const hide = (cl, i) => { cl.col[i * 4 + 3] = 0; };
 
@@ -334,7 +342,8 @@ export function createSparks({ pal, pxScale, max = 120 }) {
   const group = new THREE.Group();
   group.add(glow.pts, chips.pts);
   const hits = [];
-  const c = new THREE.Color(), crumb = new THREE.Color(pal.crumb), magma = new THREE.Color(pal.magma), hot = new THREE.Color('#ffd27a');
+  const sc = pal.sparkColors ?? [pal.magma, '#ffd27a']; // recipe-driven spark palette (obsidian: orange/gold)
+  const c = new THREE.Color(), crumb = new THREE.Color(pal.crumb), magma = new THREE.Color(sc[0]), hot = new THREE.Color(sc[1]);
   const LIFE = 0.4, G = 9;
   return {
     group,
@@ -401,7 +410,8 @@ export function createSweeper(pal, pxScale = 1000) {
   const wave = new THREE.Group();
   wave.add(dark.pts, glow.pts);
   wave.visible = false;
-  const crumb = new THREE.Color(pal.crumb), magma = new THREE.Color(pal.magma), hot = new THREE.Color('#ffd27a');
+  const pg = pal.pourGlow ?? [pal.magma, '#ffd27a'];
+  const crumb = new THREE.Color(pal.crumb), magma = new THREE.Color(pg[0]), hot = new THREE.Color(pg[1]);
 
   return {
     group, wave,

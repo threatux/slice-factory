@@ -9,6 +9,11 @@ Uses the live samples public/audio/{chop,crackle,whoosh}.wav (soft synthesis onl
   * pour rounds (R4/R5): chop.wav is DISABLED; layered stereo crackle stream (coarse/fine by round) + quiet blade hum
     at -20 dB, hard 120 ms fade at pour_end.
   * mastering: soft limiter + peak normalise to -1.0 dBFS.
+  * --audio-profile (recipe.audioProfile): "obsidian" (default, unchanged) | "metal_crystal" (gold bar / emerald core):
+    R1-R2 heavy chop.wav (pitch 0.96-1.08, 120-260 Hz body accent) + dry emerald chip from crackle.wav (15-28 ms, HP 2.4 kHz, -8 dB);
+    dense runs crossfade into HP 2.4 kHz crystal crumb (no synthetic sines anywhere); pour R4 pitch 0.98-1.10, R5 pitch 1.22-1.40 + 5-9 kHz accent;
+    drop = pure sub punch 85 -> 30 Hz + 12 ms muffled chop.wav tick (LP 1.8 kHz).
+    All v8 protections (dt crossfade, chop.wav off in pour, 120 ms pour_end fade, -1.0 dBFS, no clipping) apply to both profiles.
 """
 import argparse
 import json
@@ -23,6 +28,7 @@ PEAK_DBFS = -1.0
 TAU = 2.0 * math.pi
 AUDIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'public', 'audio')
 POUR_FADE = 0.12
+PROFILE = 'obsidian'  # set from --audio-profile
 
 
 class Mix:
@@ -177,7 +183,18 @@ def crackle(rnd, dur, pitch=1.0):
 STATS = {'chop_played': 0, 'chop_replaced': 0, 'glass_grains': 0, 'chop_skipped_pour': 0, 'clatter': 0, 'hiss': 0, 'dense': 0, 'pour_grains': 0}
 
 
+def voice_drop_metal(mix, t, inten, rnd):
+    """Massive dull thud of a gold ingot on the table: pure sub punch 85 -> 30 Hz (fast decay, no sustained tone)
+    + a 12 ms muffled contact tick from chop.wav (low-pass 1.8 kHz). No synthetic bell/ring."""
+    mix.add(t, sweep_sine(85.0, 30.0, 0.4, rate=6.0, decay=9.0), 1.0 * inten)
+    if BANK.get('chop'):
+        tick = biquad(play(BANK['chop'], 0.9, 0.0, 0.012), 'lp', 1800.0)
+        mix.add(t, fade_out(tick, 0.004), 0.5 * inten)
+
+
 def voice_drop(mix, t, inten, rnd):
+    if PROFILE == 'metal_crystal':
+        return voice_drop_metal(mix, t, inten, rnd)
     """Heavy deep landing: 80 -> 30 Hz sub + short stony contact click."""
     mix.add(t, sweep_sine(80.0, 30.0, 0.7, rate=5.0, decay=5.5), 1.0 * inten)
     click = biquad(crackle(rnd, 0.018, 1.1), 'hp', 1500.0)
@@ -205,15 +222,21 @@ def glass_grains(mix, t, dt, gain, rnd):
     random pan, timing jittered across the interval so dense runs never form a periodic (pitched) buzz."""
     span = max(0.012, dt) * 1.1
     for _ in range(rnd.randint(2, 4)):
-        x = biquad(crackle(rnd, rnd.uniform(0.012, 0.022), rnd.uniform(0.95, 1.25)), 'hp', 900.0)
+        if PROFILE == 'metal_crystal':  # dry crystalline emerald crumb: HP 2.4 kHz, pitch 1.15-1.35, no tonal content
+            x = biquad(crackle(rnd, rnd.uniform(0.012, 0.022), rnd.uniform(1.15, 1.35)), 'hp', 2400.0)
+        else:
+            x = biquad(crackle(rnd, rnd.uniform(0.012, 0.022), rnd.uniform(0.95, 1.25)), 'hp', 900.0)
         mix.add(t + rnd.uniform(-0.15, 1.0) * span, x, gain * rnd.uniform(0.45, 1.0), rnd.uniform(-0.7, 0.7))
         STATS['glass_grains'] += 1
 
 
-def voice_chop(mix, t, inten, tool, dt, phase, rnd):
+def voice_chop(mix, t, inten, tool, dt, phase, rnd, round_idx=0):
     pan = rnd.uniform(-0.25, 0.25)
     stone = tool in ('STEEL', '1000°C THERMAL')
     pitch = rnd.uniform(1.12, 1.25) if stone else rnd.uniform(1.2, 1.38)
+    metal = PROFILE == 'metal_crystal' and round_idx < 2  # R1-R2: heavy/medium gold strikes
+    if metal:
+        pitch = rnd.uniform(0.96, 1.08)
     dense = dt < 0.14
     g = inten * vary(rnd, 0.07) * (math.sqrt(max(dt, 0.02) / 0.14) if dense else 1.0)
     w = chop_share(dt)
@@ -226,12 +249,19 @@ def voice_chop(mix, t, inten, tool, dt, phase, rnd):
             STATS['dense'] += 1
         else:
             x = fade_out(x, 0.06)
+        if metal:  # heavy body accent 120-260 Hz, no ringing peak
+            bd = biquad(x, 'bp', 190.0, 0.8)
+            x = [a + 0.4 * b for a, b in zip(x, bd)]
         mix.add(t, x, 0.8 * g * w, pan)
         STATS['chop_played'] += 1
     if w < 1.0:  # replaces the tonal chop body with a non-tonal glass/stone scatter
         glass_grains(mix, t, dt, 0.75 * g * (1.0 - w), rnd)
         if w == 0.0:
             STATS['chop_replaced'] += 1
+    if metal and dt >= 0.06:  # short dry emerald crystal chip (15-28 ms, HP 2.4 kHz, -8 dB); dense runs use glass_grains instead
+        chip = biquad(crackle(rnd, rnd.uniform(0.015, 0.028), rnd.uniform(1.15, 1.35)), 'hp', 2400.0)
+        mix.add(t + 0.002, fade_out(chip, 0.006), 0.8 * g * 10 ** (-8 / 20) * min(1.0, dt / 0.14), pan)
+        STATS['crystal_chip'] = STATS.get('crystal_chip', 0) + 1
     if stone:  # hard stone/glass snap: sub punch (only while chop.wav dominates: stacked sines would buzz) + crackle crunch
         if w > 0.5:
             mix.add(t, sweep_sine(75.0, 35.0, 0.09 if not dense else 0.05, rate=4.0, decay=5.0), 0.55 * g * w * w)
@@ -279,10 +309,15 @@ def voice_pour(mix, t0, t1, round_idx, marks, rnd):
     while t < t1:
         d = density(t)
         pitch = rnd.uniform(1.15, 1.32) if fine else rnd.uniform(0.85, 0.98)
+        if PROFILE == 'metal_crystal':  # brighter, sparkling metal/crystal powder
+            pitch = rnd.uniform(1.22, 1.40) if fine else rnd.uniform(0.98, 1.10)
         dur = rnd.uniform(0.05, 0.11) if fine else rnd.uniform(0.08, 0.16)
         x = crackle(rnd, dur, pitch)
         if fine:
             x = biquad(x, 'hp', 1800.0)  # silky fine sand
+            if PROFILE == 'metal_crystal':  # delicate high-shelf accent 5-9 kHz
+                sh = biquad(biquad(x, 'hp', 5000.0, 0.7), 'lp', 9000.0, 0.7)
+                x = [a + 0.35 * b for a, b in zip(x, sh)]
         side = -side
         put(t - t0, x, (0.16 if fine else 0.24) * (0.55 + 0.45 * d) * vary(rnd, 0.2), side * rnd.uniform(0.25, 0.9))
         STATS['pour_grains'] += 1
@@ -360,13 +395,17 @@ def main():
     ap.add_argument('--tail', type=float, default=1.0, help='extra seconds after last event')
     ap.add_argument('--duration', type=float, default=None, help='force total length in seconds')
     ap.add_argument('--seed', type=int, default=7)
+    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal'], default='obsidian', help='recipe.audioProfile')
     a = ap.parse_args()
+    global PROFILE
+    PROFILE = a.audio_profile
 
     with open(a.events, encoding='utf-8') as f:
         events = sorted(json.load(f), key=lambda e: e['time'])
     rnd = random.Random(a.seed)
     for key in ('chop', 'crackle', 'whoosh'):
         BANK[key] = load_sample(key + '.wav')
+    print(f'audio profile: {PROFILE}')
     print('samples: ' + ', '.join(f'{k}={"live " + os.path.basename(v["path"]) if v else "synth fallback"}' for k, v in BANK.items()))
     total = a.duration if a.duration else (max((e['time'] for e in events), default=0.0) + a.tail + 0.6)
     mix = Mix(total)
@@ -401,7 +440,7 @@ def main():
             if i + 1 < len(ts):
                 gaps.append(ts[i + 1] - ts[i])
             dt = min(gaps) if gaps else 1.0
-            voice_chop(mix, t, inten, tool, dt, e.get('phase', ''), rnd)
+            voice_chop(mix, t, inten, tool, dt, e.get('phase', ''), rnd, e.get('round', 0))
         elif ty == 'pour_end':
             r = e['round']
             t0, t1 = windows[r]

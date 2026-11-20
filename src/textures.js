@@ -436,3 +436,288 @@ export function makeEdgeGradient(power = 2.2) {
   });
   return t.tex;
 }
+
+// ======================================================================================================
+// 24K gold / emerald look (recipe.object.material = "gold-emerald"). Obsidian code paths above are untouched.
+// ======================================================================================================
+
+/** Separable box blur on a Float32 field (clamped edges). */
+function boxBlur(a, w, h, r) {
+  if (r < 1) return a;
+  const k = 2 * r + 1, tmp = new Float32Array(a.length), out = new Float32Array(a.length);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let s = 0;
+    for (let i = -r; i <= r; i++) s += a[y * w + Math.min(w - 1, Math.max(0, x + i))];
+    tmp[y * w + x] = s / k;
+  }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let s = 0;
+    for (let i = -r; i <= r; i++) s += tmp[Math.min(h - 1, Math.max(0, y + i)) * w + x];
+    out[y * w + x] = s / k;
+  }
+  return out;
+}
+/** Paints white-on-black with the 2D API and returns the red channel as a 0..1 field. */
+function paintLayer(w, h, paint) {
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#000'; c.fillRect(0, 0, w, h);
+  paint(c);
+  const d = c.getImageData(0, 0, w, h).data, o = new Float32Array(w * h);
+  for (let j = 0; j < o.length; j++) o[j] = d[j * 4] / 255;
+  return o;
+}
+const srgbBytes = (c) => { const h = new THREE.Color(c).getHex(); return [(h >> 16) & 255, (h >> 8) & 255, h & 255]; };
+
+// ---- cast gold shell ----------------------------------------------------------------------------
+const goldCache = new Map();
+/**
+ * Cast 24K gold skin (1024² tileable): micro-sanded brushing + faint casting waves + hairline scratches.
+ * roughnessMap 0.14..0.28, fine metal normal map; same keys as makeObsidian (map, normalMap, roughnessMap).
+ */
+export function makeGoldCast(pal) {
+  const key = `gold|${pal.shell}`;
+  if (goldCache.has(key)) return goldCache.get(key);
+  const S = 1024, rnd = mulberry32(61);
+  const scr = paintLayer(S, S, (c) => {
+    c.globalCompositeOperation = 'lighter'; c.lineCap = 'round';
+    for (let i = 0; i < 90; i++) {
+      const x = rnd() * S, y = rnd() * S, a = (rnd() < 0.7 ? 0 : 1.57) + (rnd() - 0.5) * 0.5, len = 30 + rnd() * 220;
+      c.strokeStyle = `rgba(255,255,255,${(0.2 + rnd() * 0.6).toFixed(2)})`; c.lineWidth = 0.6 + rnd() * 0.9;
+      for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) {
+        c.beginPath(); c.moveTo(x + ox, y + oy); c.lineTo(x + ox + Math.cos(a) * len, y + oy + Math.sin(a) * len); c.stroke();
+      }
+    }
+  });
+  const hf = new Float32Array(S * S), rough = new Float32Array(S * S), tone = new Float32Array(S * S);
+  for (let y = 0, j = 0; y < S; y++) for (let x = 0; x < S; x++, j++) {
+    const wave = fbm(x / 128, y / 128, 8, 3, 3) - 0.5;
+    const brush = vnoise(x / 64, y / 2, 16, 5, 512) - 0.5;
+    const blot = sstep(0.4, 0.75, fbm(x / 128, y / 128, 8, 9, 3));
+    hf[j] = wave * 3.0 + brush * 0.9 + (hash2(x, y, 7) - 0.5) * 0.3 - scr[j] * 1.6;
+    rough[j] = Math.min(0.28, Math.max(0.14, 0.14 + 0.09 * blot + 0.035 * (brush + 0.5) + 0.05 * scr[j]));
+    tone[j] = 0.9 + 0.2 * fbm(x / 64, y / 64, 16, 11, 3);
+  }
+  const [R, G, B] = srgbBytes(pal.shell);
+  const map = repeat(pixelData(S, S, (x, y) => {
+    const j = y * S + x, k = tone[j], s = scr[j];
+    return [R * k + 34 * s, G * k + 28 * s, B * k + 14 * s];
+  }));
+  const roughnessMap = repeat(pixelData(S, S, (x, y) => { const r = rough[y * S + x] * 255; return [r, r, r]; }, false));
+  const out = { map, normalMap: normalFromHeight(hf, S, S, 0.8), roughnessMap };
+  goldCache.set(key, out);
+  return out;
+}
+
+// ---- engraving + surface hints of the core ----------------------------------------------------------
+/**
+ * Object-space decals for the gold block: top face (u = x, v = -z) carries the stamp (frame + 999.9 / FINE GOLD / 1000g)
+ * and one hairline crack; the +x face (u = -z, v = y) carries one more crack. Each face: tangent normal map + RGB mask
+ * (R = engraving ink, G = crack groove, B = emerald glow inside the crack). No decals on the front face.
+ */
+export function makeIngotDecals([W, H, D]) {
+  const rnd = mulberry32(2024);
+  const TW = 1024, TH = Math.round((1024 * D) / W), SW = 1024, SH = Math.round((1024 * H) / D);
+  const crack = (x0, y0, x1, y1, jit) => { // chopped, hard-angled polyline
+    const pts = [[x0, y0]], dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy), nx = -dy / L, ny = dx / L;
+    for (let s = 0; s < L;) {
+      s += 12 + rnd() * 24;
+      const u = Math.min(1, s / L), off = (rnd() - 0.5) * 2 * jit * (1 - 0.5 * u);
+      pts.push([x0 + dx * u + nx * off, y0 + dy * u + ny * off]);
+    }
+    return pts;
+  };
+  const strokePts = (c, pts, lw) => {
+    c.strokeStyle = '#fff'; c.lineWidth = lw; c.lineJoin = 'miter'; c.lineCap = 'butt';
+    c.beginPath(); pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.stroke();
+  };
+  const engrave = (c, w, h) => {
+    c.fillStyle = c.strokeStyle = '#fff'; c.lineJoin = 'round';
+    const m = 0.095 * w, m2 = m + 0.032 * w;
+    c.lineWidth = 0.014 * w; c.strokeRect(m, m, w - 2 * m, h - 2 * m);
+    c.lineWidth = 0.005 * w; c.strokeRect(m2, m2, w - 2 * m2, h - 2 * m2);
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    const fit = (txt, maxW, maxPx, yy) => {
+      const setFont = (px) => {
+        c.font = `900 ${px}px "Arial Black", Impact, "Helvetica Neue", Arial, sans-serif`;
+        if ('letterSpacing' in c) c.letterSpacing = `${(px * 0.05).toFixed(2)}px`;
+      };
+      setFont(100);
+      const px = Math.min(maxPx, (100 * maxW) / c.measureText(txt).width);
+      setFont(px);
+      c.fillText(txt, w / 2 + px * 0.025, yy);
+    };
+    fit('999.9', 0.64 * w, 0.27 * w, 0.335 * h);
+    c.fillRect(0.24 * w, 0.452 * h, 0.52 * w, 0.006 * w);
+    fit('FINE GOLD', 0.66 * w, 0.115 * w, 0.545 * h);
+    fit('1000g', 0.42 * w, 0.115 * w, 0.7 * h);
+  };
+  const face = (w, h, paintInk, cracks) => {
+    const ink = paintLayer(w, h, paintInk);
+    const groove = paintLayer(w, h, (c) => cracks.forEach((p) => strokePts(c, p.pts, p.lw)));
+    const core = paintLayer(w, h, (c) => cracks.forEach((p) => strokePts(c, p.pts, p.lw * 0.5)));
+    const coreBlur = boxBlur(core, w, h, 1), halo = boxBlur(core, w, h, 3);
+    const hf = new Float32Array(w * h), inkB = boxBlur(ink, w, h, 1), grvB = boxBlur(groove, w, h, 1);
+    for (let j = 0; j < hf.length; j++) hf[j] = inkB[j] + 1.4 * grvB[j];
+    const normal = normalFromHeight(hf, w, h, 3.0);
+    normal.wrapS = normal.wrapT = THREE.ClampToEdgeWrapping;
+    const mask = pixelData(w, h, (x, y) => {
+      const j = y * w + x;
+      return [inkB[j] * 255, grvB[j] * 255, Math.min(1, coreBlur[j] * 1.6 + halo[j] * 2.2) * 255];
+    }, false);
+    return { normal, mask };
+  };
+  // top face: cracks live in the margin between the bevel and the stamp frame (not over the lettering)
+  const A = crack(0.97 * TW, 0.68 * TH, 0.93 * TW, 0.87 * TH, 6);
+  const Ab = crack(A[2][0], A[2][1], A[2][0] - 0.022 * TW, A[2][1] + 0.025 * TH, 3);
+  const C = crack(0.3 * SW, 0, 0.36 * SW, 0.3 * SH, 7);
+  const Cb = crack(C[2][0], C[2][1], C[2][0] + 0.06 * SW, C[2][1] + 0.1 * SH, 4);
+  return {
+    top: face(TW, TH, (c) => engrave(c, TW, TH), [{ pts: A, lw: 3.4 }, { pts: Ab, lw: 2.4 }]),
+    side: face(SW, SH, () => {}, [{ pts: C, lw: 3.4 }, { pts: Cb, lw: 2.4 }]),
+  };
+}
+
+// ---- crystalline emerald cross-section ---------------------------------------------------------------
+const emeraldCache = new Map();
+/**
+ * Faceted emerald section: thin brushed-gold rim, then a Voronoi crystal (large flat facets + a faint fine layer),
+ * deep green #007a44 -> #00e676 by facet tilt, bright mint #b9ffdf refraction facets and edge lines.
+ * Returns { map, emissive, roughness, metal } (metal: B channel, gold rim only).
+ */
+export function makeEmeraldCap(pal, aspect = 1.58, scheme = {}) {
+  const sc = { name: 'emerald', dark: [0, 122, 68], bright: [0, 230, 118], mint: [185, 255, 223], rim: true, seed: 88, ...scheme };
+  const key = `${sc.name}|${pal.core}|${pal.shell}|${aspect.toFixed(3)}`;
+  if (emeraldCache.has(key)) return emeraldCache.get(key);
+  const Wd = 1024, Ht = Math.round(1024 / aspect), rnd = mulberry32(sc.seed);
+  const mk = (nx, ny, jit) => {
+    const a = [];
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      a.push({ x: (i + 0.5 + (rnd() - 0.5) * jit) * (Wd / nx), y: (j + 0.5 + (rnd() - 0.5) * jit) * (Ht / ny), tx: rnd() * 2 - 1, ty: rnd() * 2 - 1, g: rnd(), k: rnd() });
+    }
+    return a;
+  };
+  const big = mk(8, 5, 1.15), fine = mk(12, 8, 1.0);
+  const near2 = (seeds, x, y) => {
+    let a = 1e9, b = 1e9, s = seeds[0];
+    for (const p of seeds) {
+      const d = (x - p.x) * (x - p.x) + (y - p.y) * (y - p.y);
+      if (d < a) { b = a; a = d; s = p; } else if (d < b) b = d;
+    }
+    return { s, edge: Math.sqrt(b) - Math.sqrt(a) };
+  };
+  const { dark, bright, mint } = sc, gold = srgbBytes(pal.shell);
+  const rimW = sc.rim ? 0.055 * Ht : 0;
+  const N = Wd * Ht, hf = new Float32Array(Wd * Ht), col = new Float32Array(N * 3), emi = new Float32Array(N * 3), rgh = new Float32Array(N), met = new Float32Array(N);
+  for (let y = 0, j = 0; y < Ht; y++) for (let x = 0; x < Wd; x++, j++) {
+    const e = Math.min(x, y, Wd - 1 - x, Ht - 1 - y);
+    if (e < rimW) { // brushed gold lip: bright outer bevel -> darker inner step
+      const t = e / rimW, brush = 0.9 + 0.1 * fbm(x / 30, y / 3, 1e6, 4);
+      const k = (t < 0.3 ? 1.18 : 1.0 - 0.32 * sstep(0.5, 1, t)) * brush;
+      col[j * 3] = gold[0] * k; col[j * 3 + 1] = gold[1] * k; col[j * 3 + 2] = gold[2] * k;
+      rgh[j] = 56; met[j] = 255;
+      continue;
+    }
+    const B = near2(big, x, y), F = near2(fine, x, y), b = B.s;
+    let s = 0.5 + 0.5 * (b.tx * -0.55 + b.ty * -0.45) + 0.35 * (((x - b.x) * b.tx + (y - b.y) * b.ty) / 180) + (F.s.g - 0.5) * 0.22;
+    s = Math.min(1, Math.max(0, s));
+    const sp = Math.pow(s, 1.35);
+    hf[j] = ((x - b.x) * b.tx + (y - b.y) * b.ty) * 0.05; // flat tilted facet planes -> piecewise-constant normals
+    let r = dark[0] + (bright[0] - dark[0]) * sp, g = dark[1] + (bright[1] - dark[1]) * sp, bl = dark[2] + (bright[2] - dark[2]) * sp;
+    const hi = sstep(0.8, 1.0, s) * (b.k > 0.45 ? 1 : 0.4) * 0.7;
+    r += (mint[0] - r) * hi; g += (mint[1] - g) * hi; bl += (mint[2] - bl) * hi;
+    const line = Math.exp(-(B.edge * B.edge) / (2 * 1.3 * 1.3)) * (b.k < 0.7 ? 0.95 : 0.55);
+    const fl = Math.exp(-(F.edge * F.edge) / (2 * 0.9 * 0.9)) * 0.22;
+    const seam = Math.exp(-((B.edge - 5) ** 2) / 6) * 0.38;
+    const m = Math.min(1, line + fl);
+    r = (r + (mint[0] - r) * m) * (1 - seam); g = (g + (mint[1] - g) * m) * (1 - seam); bl = (bl + (mint[2] - bl) * m) * (1 - seam);
+    const lip = rimW > 0 && e < rimW + 5 ? 0.4 + 0.6 * ((e - rimW) / 5) : 1; // thin shadow seam under the gold rim
+    const ex = 0.8 * lip; // albedo pre-compensated for the lab key light (keeps the emerald saturated instead of pastel)
+    col[j * 3] = r * ex; col[j * 3 + 1] = g * ex; col[j * 3 + 2] = bl * ex;
+    const se = 0.25 + 0.75 * Math.pow(s, 1.4);
+    emi[j * 3] = bright[0] * se * 0.65 + mint[0] * m * 0.4; emi[j * 3 + 1] = bright[1] * se * 0.65 + mint[1] * m * 0.5; emi[j * 3 + 2] = bright[2] * se * 0.65 + mint[2] * m * 0.45;
+    rgh[j] = m > 0.4 ? 9 : 22 + 30 * b.g;
+    met[j] = 0;
+  }
+  const idx = (x, y) => y * Wd + x;
+  const out = {
+    map: pixelData(Wd, Ht, (x, y) => { const j = idx(x, y) * 3; return [col[j], col[j + 1], col[j + 2]]; }),
+    emissive: pixelData(Wd, Ht, (x, y) => { const j = idx(x, y) * 3; return [emi[j], emi[j + 1], emi[j + 2]]; }),
+    roughness: pixelData(Wd, Ht, (x, y) => { const v = rgh[idx(x, y)]; return [v, v, v]; }, false),
+    metal: pixelData(Wd, Ht, (x, y) => { const v = met[idx(x, y)]; return [v, v, v]; }, false),
+    normal: normalFromHeight(hf, Wd, Ht, 10),
+  };
+  out.normal.wrapS = out.normal.wrapT = THREE.ClampToEdgeWrapping;
+  emeraldCache.set(key, out);
+  return out;
+}
+
+/** Faceted ruby (anomaly cube): same Voronoi crystal as the emerald section in a deep ruby palette, no gold rim. */
+export function makeRubyCap(pal, aspect = 1.58) {
+  return makeEmeraldCap(pal, aspect, { name: 'ruby', dark: [110, 0, 22], bright: [213, 0, 50], mint: [255, 138, 163], rim: false, seed: 131 });
+}
+
+// ---- gold / emerald piles --------------------------------------------------------------------------
+/** R4: coarse gold shavings/nuggets (faceted Voronoi chips) with bright emerald shards. Tileable. Returns { map, roughness, emissive, normalMap, metal }. */
+export function makeGoldGravel(pal) {
+  const S = 512, rnd = mulberry32(56), N = 150;
+  const seeds = Array.from({ length: N }, () => ({ x: rnd() * S, y: rnd() * S, tint: rnd(), gloss: rnd(), emerald: rnd() < 0.22, gx: (rnd() - 0.5) * 0.9, gy: (rnd() - 0.5) * 0.9 }));
+  const id = new Int32Array(S * S), f1 = new Float32Array(S * S), f2 = new Float32Array(S * S), sh = new Float32Array(S * S);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    let a = 1e9, b = 1e9, k = 0, ex = 0, ey = 0;
+    for (let i = 0; i < N; i++) {
+      let dx = x - seeds[i].x, dy = y - seeds[i].y;
+      if (dx > S / 2) dx -= S; else if (dx < -S / 2) dx += S;
+      if (dy > S / 2) dy -= S; else if (dy < -S / 2) dy += S;
+      const d = dx * dx + dy * dy;
+      if (d < a) { b = a; a = d; k = i; ex = dx; ey = dy; } else if (d < b) b = d;
+    }
+    const j = y * S + x;
+    id[j] = k; f1[j] = Math.sqrt(a); f2[j] = Math.sqrt(b);
+    sh[j] = seeds[k].gx * ex + seeds[k].gy * ey; // facet tilt
+  }
+  const hf = new Float32Array(S * S);
+  for (let j = 0; j < S * S; j++) hf[j] = Math.min(8, f2[j] - f1[j]) + sh[j] * 0.12 + (hash2(j % S, (j / S) | 0, 2) - 0.5) * 0.5;
+  const [R, G, B] = srgbBytes(pal.shell);
+  const map = repeat(pixelData(S, S, (x, y) => {
+    const j = y * S + x, s = seeds[id[j]], gap = sstep(0, 3, f2[j] - f1[j]);
+    const lit = 0.5 + 0.5 * Math.max(-1, Math.min(1, sh[j] / 18));
+    if (s.emerald) {
+      const t = (0.35 + 0.65 * lit) * (0.45 + 0.55 * gap), hi = sstep(0.8, 1, lit * s.gloss + 0.25) * 0.6;
+      return [185 * hi, (122 + 108 * t) + 60 * hi, (68 + 50 * t) + 100 * hi];
+    }
+    const k = (0.5 + 0.8 * s.tint) * (0.3 + 0.7 * gap) * (0.75 + 0.5 * lit);
+    return [R * k, G * k, B * k];
+  }));
+  const roughness = repeat(pixelData(S, S, (x, y) => { const s = seeds[id[y * S + x]], r = s.emerald ? 14 + 30 * s.gloss : 40 + 90 * s.gloss; return [r, r, r]; }, false));
+  const emissive = repeat(pixelData(S, S, (x, y) => {
+    const j = y * S + x, s = seeds[id[j]];
+    if (!s.emerald) return [0, 0, 0];
+    const c = 0.35 + 0.65 * Math.exp(-f1[j] / 16);
+    return [30 * c, 205 * c, 105 * c];
+  }));
+  const metal = repeat(pixelData(S, S, (x, y) => { const v = seeds[id[y * S + x]].emerald ? 0 : 255; return [v, v, v]; }, false));
+  return { map, roughness, emissive, metal, normalMap: normalFromHeight(hf, S, S, 0.9) };
+}
+
+/** R5: silky gold micro-dust (tiled, high-frequency): dense metal micro-glints, rare emerald crumbs. */
+export function makeGoldDust(pal) {
+  const S = 512, hf = new Float32Array(S * S);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const g = hash2(x, y, 11);
+    hf[y * S + x] = hash2(x, y, 7) * 0.9 + vnoise(x / 2, y / 2, S / 2, 3) * 0.7 + fbm(x / 40, y / 40, 12.8, 4) * 0.9 + (g > 0.96 ? 1.4 : 0);
+  }
+  const [R, G, B] = srgbBytes(pal.shell);
+  const map = repeat(pixelData(S, S, (x, y) => {
+    const g = hash2(x, y, 11), k = 0.5 + 0.5 * hash2(x, y, 13) + 0.25 * vnoise(x / 5, y / 5, S / 5, 9);
+    if (hash2(x, y, 19) > 0.977) return [10, 170 + 60 * hash2(x, y, 21), 95];
+    const glint = g > 0.96 ? 90 + 130 * hash2(x, y, 17) : 0;
+    return [R * k * 0.95 + glint, G * k * 0.95 + glint * 0.94, B * k + glint * 0.7];
+  }));
+  const roughness = repeat(pixelData(S, S, (x, y) => {
+    const g = hash2(x, y, 11), r = g > 0.96 ? 6 : g > 0.9 ? 40 : 90 + 90 * hash2(x, y, 23);
+    return [r, r, r];
+  }, false));
+  return { map, roughness, normalMap: normalFromHeight(hf, S, S, 2.4) };
+}

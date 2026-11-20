@@ -4,7 +4,7 @@ import { LAYOUT } from './config.js';
 import { makeTableTexture, makeRulerTexture, makeBackdropTexture } from './textures.js';
 
 /** "Precision Cutting Lab": dark matte table with mm markings, ruler, architectural backdrop, rim lighting. No post-processing. */
-export function createScene(profile, pal) {
+export function createScene(profile, pal, opts = {}) {
   const canvas = document.getElementById('c');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(1);
@@ -26,7 +26,7 @@ export function createScene(profile, pal) {
 
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-  scene.environmentIntensity = 0.3;
+  scene.environmentIntensity = opts.environmentIntensity ?? 0.3; // recipe.scene.environmentIntensity (metal looks need more)
   pmrem.dispose();
 
   scene.add(new THREE.HemisphereLight(0x8aa0c8, 0x1a1418, 0.25));
@@ -40,7 +40,7 @@ export function createScene(profile, pal) {
   scene.add(key);
 
   // Rim / back lights give obsidian its edge highlights.
-  const rim = new THREE.SpotLight(pal.accent, 35, 14, 0.7, 0.8, 2);
+  const rim = new THREE.SpotLight(pal.accent, opts.rimIntensity ?? 35, 14, 0.7, 0.8, 2);
   rim.position.set(-2.8, 1.3, -3.0); // low: grazes the edges, no orange glare blob on the glossy top
   rim.target.position.set(0, 0.5, 0);
   const rim2 = new THREE.SpotLight(0x86b4ff, 70, 14, 0.7, 0.8, 2);

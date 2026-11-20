@@ -82,7 +82,7 @@ try {
     const r = spawnSync(cmd, argv, { stdio: 'inherit' });
     if (r.error || r.status !== 0) throw new Error(`${cmd} failed (${r.error?.message ?? 'exit ' + r.status})`);
   };
-  run(process.env.PYTHON_PATH || 'python', [path.join(root, 'scripts', 'build-audio.py'), eventsPath, wavPath]);
+  run(process.env.PYTHON_PATH || 'python', [path.join(root, 'scripts', 'build-audio.py'), eventsPath, wavPath, `--audio-profile=${recipe.audioProfile ?? 'obsidian'}`]);
   run(process.env.FFMPEG_PATH || 'ffmpeg', [
     '-y', '-loglevel', 'error', '-i', videoPath, '-i', wavPath,
     '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', '-movflags', '+faststart', out,

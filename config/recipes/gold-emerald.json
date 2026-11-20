@@ -1,0 +1,47 @@
+{
+  "id": "gold-emerald",
+  "title": "24K GOLD BAR vs 1,000 CUTS",
+  "titleLines": ["24K GOLD BAR", "vs 1,000 CUTS"],
+  "subtitle": "PRECISION CUTTING LAB",
+  "audioProfile": "metal_crystal",
+  "seed": 1383,
+  "object": {
+    "type": "procedural",
+    "material": "gold-emerald",
+    "shape": "block",
+    "size": [1.5, 0.95, 1.5],
+    "flake": 0.0012,
+    "glow": { "cap": 0.38, "light": 0.4, "halo": 0.3 },
+    "glb": { "url": "/models/object.glb", "scale": 1, "rotation": [0, 0, 0] }
+  },
+  "scene": { "environmentIntensity": 0.85, "rimIntensity": 9 },
+  "palette": {
+    "shell": "#f4c430",
+    "inner": "#007a44",
+    "core": "#00e676",
+    "accent": "#f5c542",
+    "accent2": "#00e676",
+    "crumb": "#a0801c",
+    "magma": "#00e676",
+    "gold": "#ff1744",
+    "table": "#0e0f13",
+    "background": "#050609",
+    "sparkColors": ["#38e8ff", "#e0fcff"],
+    "pourGlow": ["#00e676", "#ffd966", "#fff6cf"]
+  },
+  "timing": { "hook": 1.8, "drop": 0.25, "pre": 0.15, "settle": 0.55, "sweep": 0.55, "tail": 0.5, "rotate": 0.4, "gap": 0.9 },
+  "rounds": [
+    { "cuts": 10,   "tool": "STEEL",          "mode": "slice", "duration": 4.35, "phaseA": 1.1, "first": 0.28, "gap": 0.4, "rotLead": 0.05, "rotate": 0.25, "accel": 1.5, "cubeSize": 0.25, "cols": 6, "tiers": 2, "zoom": 1.0,  "finalSize": 0.011 },
+    { "cuts": 50,   "tool": "1000°C THERMAL", "mode": "slice", "duration": 6.6, "accel": 1.8, "cubeSize": 0.085, "zoom": 0.97, "finalSize": 0.0027 },
+    { "cuts": 150,  "tool": "ULTRASONIC",     "mode": "slice", "duration": 6.6, "accel": 2.0, "cubeSize": 0.06,  "zoom": 0.9,  "finalSize": 0.000694 },
+    { "cuts": 400,  "tool": "PLASMA",         "mode": "pour",  "duration": 5.6, "accel": 1.3, "zoom": 0.86, "pile": "gravel", "finalSize": 0.000177 },
+    { "cuts": 1000, "tool": "HYPER-SLICE",    "mode": "pour",  "duration": 6.4, "accel": 1.2, "zoom": 0.83, "pile": "sand",   "finalSize": 0.000045 }
+  ],
+  "tools": {
+    "STEEL":          { "blade": "#cfd6de", "metalness": 0.92, "roughness": 0.24, "emissive": "#000000", "emissiveIntensity": 0,   "opacity": 1,    "edge": "#eaf2ff", "edgeGlow": 0.25, "light": "#cfe0ff", "lightIntensity": 1.5, "ghosts": 0 },
+    "1000°C THERMAL": { "blade": "#8d9097", "metalness": 0.7,  "roughness": 0.35, "emissive": "#38e8ff", "emissiveIntensity": 1.7, "opacity": 1,    "edge": "#38e8ff", "edgeGlow": 1.0,  "light": "#38e8ff", "lightIntensity": 6,   "ghosts": 0 },
+    "ULTRASONIC":     { "blade": "#aebcc9", "metalness": 0.85, "roughness": 0.22, "emissive": "#38e8ff", "emissiveIntensity": 0.9, "opacity": 1,    "edge": "#6aeeff", "edgeGlow": 1.0,  "light": "#4cecff", "lightIntensity": 5,   "ghosts": 2, "ghostOpacity": 0.1 },
+    "PLASMA":         { "blade": "#b9a3ff", "metalness": 0.3,  "roughness": 0.3,  "emissive": "#7af0ff", "emissiveIntensity": 0.7, "opacity": 0.55, "edge": "#a8f6ff", "edgeGlow": 0.8,  "light": "#7af0ff", "lightIntensity": 8,   "ghosts": 4, "ghostOpacity": 0.08 },
+    "HYPER-SLICE":    { "blade": "#9fe8f2", "metalness": 0.1,  "roughness": 0.2,  "emissive": "#b8f8ff", "emissiveIntensity": 0.8, "opacity": 0.45,  "edge": "#e0fcff", "edgeGlow": 1.0,  "light": "#c8fbff", "lightIntensity": 10,  "ghosts": 5, "ghostOpacity": 0.07 }
+  }
+}
