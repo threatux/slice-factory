@@ -2,7 +2,7 @@
 // X/Y/Z seam lines computed in the fragment shader from object-space position (no decal geometry -> no Z-fighting).
 import * as THREE from 'three';
 import { blockGeometry, addIngotDecals } from '../objects.js';
-import { makeGoldCast, makeIngotDecals } from '../textures.js';
+import { makeGoldCast, makeIngotDecals, makeVolcanicObsidian } from '../textures.js';
 
 /**
  * Seams of axis a sit on the planes p_a = -S_a/2 + k S_a / n_a, k = 1..n_a-1. Seams k < lo are fully lit; lo <= k < hi are lit
@@ -65,8 +65,15 @@ export function createIngot(recipe) {
   const seamCfg = { width: 0.024, glow: 2.4, flash: 5, ...(recipe.v2.seam ?? {}) };
   const [c1, c2] = pal.seam ?? ['#c8fff4', pal.core];
   const frame = new THREE.Group(); // ingot pose (y + yaw); blades & sparks are expressed in this frame too
-  const gc = makeGoldCast(pal), dec = makeIngotDecals([W, H, D]);
-  const mat = new THREE.MeshPhysicalMaterial({
+  // surfaceStyle: "gold" (default: cast gold + stamp) | "obsidian" (volcanic glass with smouldering fractures); engraving: false drops the stamp
+  const volcanic = cfg.surfaceStyle === 'obsidian';
+  const gc = volcanic ? makeVolcanicObsidian(pal) : makeGoldCast(pal);
+  const dec = makeIngotDecals([W, H, D], { engrave: cfg.engraving ?? true });
+  const mat = volcanic ? new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, map: gc.map, normalMap: gc.normalMap, normalScale: new THREE.Vector2(0.9, 0.9),
+    roughnessMap: gc.roughnessMap, roughness: 1, metalness: 0.15, clearcoat: 0.65, clearcoatRoughness: 0.06,
+    emissive: 0xffffff, emissiveMap: gc.emissiveMap, emissiveIntensity: cfg.smoulder ?? 1.0,
+  }) : new THREE.MeshPhysicalMaterial({
     color: 0xffffff, map: gc.map, normalMap: gc.normalMap, normalScale: new THREE.Vector2(0.5, 0.5),
     roughnessMap: gc.roughnessMap, roughness: 1, metalness: 0.96, clearcoat: 0.35, clearcoatRoughness: 0.12,
   });
@@ -80,7 +87,7 @@ export function createIngot(recipe) {
   addSeams(mat, U);
   const decal = {
     uDTopN: { value: dec.top.normal }, uDTopM: { value: dec.top.mask }, uDSideN: { value: dec.side.normal }, uDSideM: { value: dec.side.mask },
-    uDSize: { value: new THREE.Vector3(W, H, D) }, uDGlowCol: { value: new THREE.Color(pal.core) }, uDGlow: { value: 0.45 }, uDStr: { value: 1.0 },
+    uDSize: { value: new THREE.Vector3(W, H, D) }, uDGlowCol: { value: new THREE.Color(pal.crackGlow ?? pal.core) }, uDGlow: { value: cfg.crackGlow ?? 0.45 }, uDStr: { value: 1.0 },
   };
   addIngotDecals(mat, decal);
   const mesh = new THREE.Mesh(blockGeometry(W, H, D, bevel, 17, cfg.flake ?? 0.006), mat);

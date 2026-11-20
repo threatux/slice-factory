@@ -99,7 +99,7 @@ export function makeShardMaterial(obs, cap, look = {}) {
   // defaults = obsidian look (identical shading to the original shader); other recipes override through SHARD_LOOKS
   const o = {
     metalness: 0.05, innerMetal: 0.05, innerRough: 0.6, innerEmi: [0.25, 1.1], normalScale: 0.5, clearcoat: 0.9,
-    anomMetal: 1.0, anomRough: 0.22, anomEmi: 0.18, anomAlbedo: 1.0, anomCoat: null, ruby: null, rim: 0, rimColor: '#ffffff', sampLo: 0, sampHi: 1, key: 'obsidian', ...look,
+    anomMetal: 1.0, anomRough: 0.22, anomEmi: 0.18, anomAlbedo: 1.0, anomCoat: null, ruby: null, rim: 0, rimColor: '#ffffff', sampLo: 0, sampHi: 1, seedFit: 0, key: 'obsidian', ...look,
   };
   const mat = new THREE.MeshPhysicalMaterial({
     color: 0xffffff, map: obs.map, normalMap: obs.normalMap, normalScale: new THREE.Vector2(o.normalScale, o.normalScale),
@@ -110,7 +110,7 @@ export function makeShardMaterial(obs, cap, look = {}) {
     uInnerMetal: { value: o.innerMetal }, uInnerRough: { value: o.innerRough }, uInnerEmi: { value: new THREE.Vector2(...o.innerEmi) },
     uAnomAlbedo: { value: o.anomAlbedo }, uAnomCoat: { value: o.anomCoat ?? o.clearcoat },
     uUseRuby: { value: o.ruby ? 1 : 0 }, uRubyMap: { value: o.ruby?.map ?? cap.map }, uRubyEmi: { value: o.ruby?.emissive ?? cap.emissive }, uRubyN: { value: o.ruby?.normal ?? cap.map }, uAnomMetal: { value: o.anomMetal }, uAnomRough: { value: o.anomRough }, uAnomEmi: { value: o.anomEmi },
-    uRim: { value: o.rim }, uRimCol: { value: new THREE.Color(o.rimColor) }, uSamp: { value: new THREE.Vector2(o.sampLo, o.sampHi) },
+    uRim: { value: o.rim }, uRimCol: { value: new THREE.Color(o.rimColor) }, uSamp: { value: new THREE.Vector2(o.sampLo, o.sampHi) }, uFit: { value: o.seedFit },
   };
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms);
@@ -135,7 +135,7 @@ vSEx = normalize(sMV * vec3(1.0, 0.0, 0.0)); vSEy = normalize(sMV * vec3(0.0, 1.
       .replace('#include <common>', `#include <common>
 uniform sampler2D uCapMap, uCapEmi;
 uniform sampler2D uRubyMap, uRubyEmi, uRubyN; uniform float uUseRuby, uAnomCoat;
-uniform float uAnomAlbedo, uInnerMetal, uInnerRough, uAnomMetal, uAnomRough, uAnomEmi, uRim; uniform vec2 uInnerEmi, uSamp; uniform vec3 uRimCol;
+uniform float uAnomAlbedo, uInnerMetal, uInnerRough, uAnomMetal, uAnomRough, uAnomEmi, uRim; uniform vec2 uInnerEmi, uSamp; uniform float uFit; uniform vec3 uRimCol;
 varying vec3 vSP; varying vec3 vSN; varying vec3 vOutP; varying vec3 vOutN; varying float vHeat; varying vec2 vSeed; varying vec3 vSEx; varying vec3 vSEy; varying vec3 vSEz;`)
       .replace('#include <map_fragment>', `#include <map_fragment>
 vec3 sa = abs(vSN);
@@ -146,7 +146,9 @@ else { sOuter = vSN.z > 0.0 ? vOutP.z : vOutN.z; sFc = vSP.xy; }
 float sGold = step(vHeat, -0.5);
 float sInner = (1.0 - sOuter) * (1.0 - sGold);
 float sC = clamp(1.0 - 2.0 * max(abs(sFc.x), abs(sFc.y)), 0.0, 1.0);
-vec2 sUv = clamp(vec2(0.18, 0.18) + vSeed * 0.5 + (sFc + 0.5) * 0.32 + sN(sa), vec2(uSamp.x), vec2(uSamp.y));
+// uFit: per-instance window offset scaled so the whole face window stays inside [uSamp.x, uSamp.y] (no clamp streaks)
+vec2 sBase = uFit > 0.5 ? vec2(uSamp.x) + vSeed * (uSamp.y - uSamp.x - 0.45) : vec2(0.18, 0.18) + vSeed * 0.5;
+vec2 sUv = clamp(sBase + (sFc + 0.5) * 0.32 + sN(sa), vec2(uSamp.x), vec2(uSamp.y));
 vec3 sCapCol = texture2D(uCapMap, sUv).rgb;
 vec3 sCapEmi = texture2D(uCapEmi, sUv).rgb;
 diffuseColor.rgb = mix(diffuseColor.rgb, sCapCol, sInner);
@@ -199,5 +201,10 @@ export const SHARD_LOOKS = {
   'gold-emerald': {
     key: 'gold-emerald', metalness: 0.96, innerMetal: 0.0, innerRough: 0.16, innerEmi: [0.18, 0.45], normalScale: 0.6, clearcoat: 0.35,
     anomMetal: 0.05, anomRough: 0.11, anomEmi: 0.7, anomAlbedo: 1.0, anomCoat: 1.0, rim: 0.05, rimColor: '#f4c430', sampLo: 0.12, sampHi: 0.88,
+  },
+  // volcanic obsidian skin (glossy black glass) + molten magma fracture faces; the anomaly is a separate mesh (debris.js)
+  'obsidian-magma': {
+    key: 'obsidian-magma', metalness: 0.15, innerMetal: 0.0, innerRough: 0.55, innerEmi: [0.7, 0.9], normalScale: 0.9, clearcoat: 0.65,
+    rim: 0, sampLo: 0.1, sampHi: 0.9, seedFit: 1,
   },
 };

@@ -7,6 +7,9 @@ const sm = (a, b, x) => { const u = clamp01((x - a) / (b - a)); return u * u * (
 
 export function createHudV2(profile, recipe, tl) {
   const V = recipe.v2, pal = recipe.palette;
+  // recipe.v2.hud overrides (defaults reproduce the gold-emerald look 1:1)
+  const hc = { badgeFrom: pal.shell, badgeTo: '#ffe27a', badgeText: '#111', bonusFrom: pal.shell, bonusMid: '#fff3b0', bonusTo: pal.core, hot: pal.accent, ...(V.hud ?? {}) };
+  const bonusGrad = hc.bonusMid ? `${hc.bonusFrom}, ${hc.bonusMid} 45%, ${hc.bonusTo}` : `${hc.bonusFrom}, ${hc.bonusTo}`;
   const stage = document.getElementById('stage');
   stage.style.width = profile.width + 'px';
   stage.style.height = profile.height + 'px';
@@ -19,14 +22,14 @@ export function createHudV2(profile, recipe, tl) {
     #v2 .ln { position: absolute; left: 4%; right: 4%; white-space: nowrap; transform-origin: 50% 50%;
       text-shadow: 0 0 calc(var(--h) * .012) rgba(0,0,0,.85), 0 calc(var(--h) * .003) calc(var(--h) * .004) rgba(0,0,0,.9); }
     #v2 #v2-label { top: 8.5%; font-size: calc(var(--h) * .064); letter-spacing: -.01em; line-height: 1; }
-    #v2 #v2-label.bonus { background: linear-gradient(90deg, ${pal.shell}, #fff3b0 45%, ${pal.core}); -webkit-background-clip: text; background-clip: text;
+    #v2 #v2-label.bonus { background: linear-gradient(90deg, ${bonusGrad}); -webkit-background-clip: text; background-clip: text;
       color: transparent; text-shadow: none; filter: drop-shadow(0 0 calc(var(--h) * .008) rgba(0,0,0,.9)); }
     #v2 #v2-count { top: 15.6%; font-size: calc(var(--h) * .03); font-weight: 700; letter-spacing: .02em; color: #e9ecf2; line-height: 1; }
-    #v2 #v2-count.hot { color: ${pal.accent}; }
+    #v2 #v2-count.hot { color: ${hc.hot}; }
     #v2 #v2-hook { top: 8%; font-size: calc(var(--h) * .07); line-height: 1; letter-spacing: -.01em; }
     #v2 #v2-badge { top: 16.2%; left: 50%; right: auto; width: max-content; transform: translateX(-50%); font-size: calc(var(--h) * .03); font-weight: 800; line-height: 1;
-      padding: calc(var(--h) * .011) calc(var(--h) * .022); border-radius: 999px; color: #111; text-shadow: none;
-      background: linear-gradient(90deg, ${pal.shell}, #ffe27a); box-shadow: 0 calc(var(--h) * .004) calc(var(--h) * .02) rgba(0,0,0,.55); }
+      padding: calc(var(--h) * .011) calc(var(--h) * .022); border-radius: 999px; color: ${hc.badgeText}; text-shadow: none;
+      background: linear-gradient(90deg, ${hc.badgeFrom}, ${hc.badgeTo}); box-shadow: 0 calc(var(--h) * .004) calc(var(--h) * .02) rgba(0,0,0,.55); }
     #v2 #v2-final { top: 22%; font-size: calc(var(--h) * .047); line-height: 1.05; }
     #v2-flash { position: absolute; inset: 0; background: #fff; opacity: 0; mix-blend-mode: screen; }
   `;

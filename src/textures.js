@@ -73,8 +73,10 @@ const obsCache = new Map();
  * - roughness 0.08 (fresh flakes) .. 0.38 (matte patches / inside fractures);
  * - emissive: only the very core of some fracture segments smoulders deep red-orange.
  */
-export function makeObsidian(pal) {
-  const key = `${pal.shell}|${pal.magma}`;
+export function makeObsidian(pal, opts = {}) {
+  // opts (all optional, defaults = v1 look): roughMax (roughness ceiling), lift [r,g,b] (0..255 albedo floor so near-black glass still shows facets)
+  const roughMax = opts.roughMax ?? 0.38, lift = opts.lift ?? [0, 0, 0], smoulder = opts.smoulder ?? null; // smoulder: [r,g,b] 0..255 colour of the glowing fracture cores
+  const key = `${pal.shell}|${pal.magma}` + (opts.roughMax || opts.lift || opts.smoulder ? `|${roughMax}|${lift.join(',')}|${smoulder}` : '');
   if (obsCache.has(key)) return obsCache.get(key);
   const S = 1024, rnd = mulberry32(31);
 
@@ -135,10 +137,10 @@ export function makeObsidian(pal) {
       + (fbm(x / 64, y / 64, 16, 3) - 0.5) * 1.2
       - g * 4 - c * 2; // deep narrow groove
     const matte = sstep(0.55, 0.78, fbm(x / 128, y / 128, 8, 9));
-    rough[j] = Math.min(0.38, 0.08 + 0.22 * matte + 0.09 * Math.exp(-edge / 3) + 0.3 * g);
+    rough[j] = Math.min(roughMax, 0.08 + 0.22 * matte + 0.09 * Math.exp(-edge / 3) + 0.3 * g);
   }
   const base = new THREE.Color(pal.shell);
-  const br = base.r * 255, bg = base.g * 255, bb = base.b * 255;
+  const br = base.r * 255 + lift[0], bg = base.g * 255 + lift[1], bb = base.b * 255 + lift[2];
   const map = repeat(pixelData(S, S, (x, y) => {
     const j = y * S + x;
     const band = fbm(x / S * 3, y / S * 22, 3, 21, 3, 22); // faint flow banding of the glass
@@ -152,6 +154,7 @@ export function makeObsidian(pal) {
   const emissiveMap = repeat(pixelData(S, S, (x, y) => {
     const j = y * S + x;
     const e = core[j] * groove[j] * sstep(0.55, 0.72, fbm(x / S * 6, y / S * 6, 6, 77));
+    if (smoulder) return [smoulder[0] * e, smoulder[1] * e, smoulder[2] * e];
     return [255 * e * 0.42, 255 * e * magma.g * 0.12, 255 * e * magma.b * 0.04];
   }));
   const out = { map, normalMap, roughnessMap, emissiveMap };
@@ -516,7 +519,7 @@ export function makeGoldCast(pal) {
  * and one hairline crack; the +x face (u = -z, v = y) carries one more crack. Each face: tangent normal map + RGB mask
  * (R = engraving ink, G = crack groove, B = emerald glow inside the crack). No decals on the front face.
  */
-export function makeIngotDecals([W, H, D]) {
+export function makeIngotDecals([W, H, D], { engrave: withStamp = true } = {}) {
   const rnd = mulberry32(2024);
   const TW = 1024, TH = Math.round((1024 * D) / W), SW = 1024, SH = Math.round((1024 * H) / D);
   const crack = (x0, y0, x1, y1, jit) => { // chopped, hard-angled polyline
@@ -574,7 +577,7 @@ export function makeIngotDecals([W, H, D]) {
   const C = crack(0.3 * SW, 0, 0.36 * SW, 0.3 * SH, 7);
   const Cb = crack(C[2][0], C[2][1], C[2][0] + 0.06 * SW, C[2][1] + 0.1 * SH, 4);
   return {
-    top: face(TW, TH, (c) => engrave(c, TW, TH), [{ pts: A, lw: 3.4 }, { pts: Ab, lw: 2.4 }]),
+    top: face(TW, TH, withStamp ? (c) => engrave(c, TW, TH) : () => {}, [{ pts: A, lw: 3.4 }, { pts: Ab, lw: 2.4 }]),
     side: face(SW, SH, () => {}, [{ pts: C, lw: 3.4 }, { pts: Cb, lw: 2.4 }]),
   };
 }
@@ -720,4 +723,72 @@ export function makeGoldDust(pal) {
     return [r, r, r];
   }, false));
   return { map, roughness, normalMap: normalFromHeight(hf, S, S, 2.4) };
+}
+
+
+// ======================================================================================================
+// Volcanic obsidian / molten magma look (recipe.object.surfaceStyle = "obsidian"). Gold paths above are untouched.
+// ======================================================================================================
+/** Volcanic glass shell (shared by the ingot and its shards): roughness 0.08-0.32, lifted near-black albedo, smouldering fracture cores. */
+export function makeVolcanicObsidian(pal) {
+  const h = new THREE.Color(pal.crackGlow ?? '#ff3b00').getHex();
+  return makeObsidian(pal, { roughMax: 0.32, lift: pal.glassLift ?? [14, 15, 20], smoulder: [(h >> 16) & 255, (h >> 8) & 255, h & 255] });
+}
+
+const magmaCache = new Map();
+/**
+ * Molten-magma cut face: deep black basalt crust with a network of glowing veins. Emissive ramp (per pal.magmaVeins,
+ * default #d91e00 -> #ff7b00 -> #fff1b8): white only on the thinnest vein cores, so the face glows without burning out to a flat white patch.
+ * Returns { map, emissive, roughness } (same keys as makeCap / makeEmeraldCap).
+ */
+export function makeMagmaCap(pal, aspect = 1.58) {
+  const veins = pal.magmaVeins ?? ['#d91e00', '#ff7b00', '#fff1b8'];
+  const key = `magma|${veins.join('')}|${pal.shell}|${aspect.toFixed(3)}`;
+  if (magmaCache.has(key)) return magmaCache.get(key);
+  const [v0, v1, v2] = veins.map(srgbBytes), shell = srgbBytes(pal.shell);
+  const Wd = 1024, Ht = Math.round(1024 / aspect), rnd = mulberry32(177);
+  const seedsA = Array.from({ length: 26 }, () => [rnd() * Wd, rnd() * Ht]);
+  const seedsB = Array.from({ length: 90 }, () => [rnd() * Wd, rnd() * Ht]);
+  const rimW = 0.06 * Ht;
+  const f12 = (seeds, x, y) => {
+    let f1 = 1e9, f2 = 1e9;
+    for (const [sx, sy] of seeds) {
+      const d = (x - sx) * (x - sx) + (y - sy) * (y - sy);
+      if (d < f1) { f2 = f1; f1 = d; } else if (d < f2) f2 = d;
+    }
+    return Math.sqrt(f2) - Math.sqrt(f1);
+  };
+  const heat = new Float32Array(Wd * Ht), crustG = new Float32Array(Wd * Ht);
+  for (let y = 0; y < Ht; y++) for (let x = 0; x < Wd; x++) {
+    const wx = x + (fbm(x / 70, y / 70, 64, 4) - 0.5) * 70, wy = y + (fbm(x / 70 + 9, y / 70, 64, 6) - 0.5) * 70;
+    const a = f12(seedsA, wx, wy), b = f12(seedsB, wx + 13, wy - 7);
+    const edge = Math.min(x, y, Wd - 1 - x, Ht - 1 - y);
+    const inner = sstep(rimW + 3, rimW + 30, edge);
+    const centre = 1 - Math.min(1, Math.hypot((x - Wd / 2) / (Wd / 2), (y - Ht / 2) / (Ht / 2)));
+    const ca = Math.exp(-(a * a) / 1.5), ga = Math.exp(-a / 7);
+    const cb = Math.exp(-(b * b) / 0.75) * 0.6, gb = Math.exp(-b / 4) * 0.3;
+    const pulse = 0.55 + 0.45 * fbm(x / 60, y / 60, 1e6, 31); // some veins burn hotter than others
+    const c = (ca + cb) * (0.7 + 0.5 * centre) * (0.65 + 0.55 * pulse);
+    const g = (ga * 0.55 + gb) * (0.6 + 0.6 * centre);
+    heat[y * Wd + x] = inner * (c * 0.85 + g * 0.26);
+    crustG[y * Wd + x] = inner * g;
+  }
+  const ramp = (e) => { // e: 0..~1.2 -> emissive rgb (0..255)
+    const lerp3 = (A, B, u) => [A[0] + (B[0] - A[0]) * u, A[1] + (B[1] - A[1]) * u, A[2] + (B[2] - A[2]) * u];
+    if (e < 0.6) return lerp3([0, 0, 0], v0, sstep(0.3, 0.6, e)); // no dim glow between the veins: black glass stays black
+    if (e < 0.9) return lerp3(v0, v1, sstep(0.6, 0.9, e));
+    return lerp3(v1, v2, sstep(0.95, 1.2, e));
+  };
+  const isRim = (x, y) => Math.min(x, y, Wd - 1 - x, Ht - 1 - y) < rimW;
+  const map = pixelData(Wd, Ht, (x, y) => {
+    const i = y * Wd + x;
+    if (isRim(x, y)) { const s = 0.7 + 0.3 * fbm(x / 30, y / 30, 1e6, 2); return [shell[0] * s + 14, shell[1] * s + 15, shell[2] * s + 20]; }
+    const n = fbm(x / 20, y / 20, 1e6, 8), g = crustG[i], e = Math.min(1.2, heat[i]);
+    return [9 + 7 * n + 12 * g + 22 * e, 9 + 5 * n + 4 * g + 6 * e, 12 + 5 * n + 2 * g]; // near-black volcanic glass crust (~#09090c), faintly scorched at the veins
+  });
+  const emissive = pixelData(Wd, Ht, (x, y) => (isRim(x, y) ? [0, 0, 0] : ramp(Math.min(1.2, heat[y * Wd + x]))));
+  const roughness = pixelData(Wd, Ht, (x, y) => { const v = isRim(x, y) ? 26 : 150 + 70 * fbm(x / 16, y / 16, 1e6, 12); return [v, v, v]; }, false);
+  const out = { map, emissive, roughness };
+  magmaCache.set(key, out);
+  return out;
 }

@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import { makeShardMaterial, SHARD_LOOKS } from '../slabs.js';
-import { makeGoldCast, makeEmeraldCap, makeRubyCap } from '../textures.js';
+import { makeGoldCast, makeEmeraldCap, makeRubyCap, makeVolcanicObsidian, makeMagmaCap } from '../textures.js';
 import { LAYOUT } from '../config.js';
 import { mulberry32, clamp01 } from '../util.js';
 
@@ -48,6 +48,24 @@ function instanced(geo, mat, cap, shadows) {
   return mesh;
 }
 
+/** Brilliant-cut diamond (lathe, 10 facets, flat shaded): tall pavilion, wide table; per-vertex gradient bottom -> girdle -> table. */
+function diamondGeometry(r, [cLo, cMid, cHi]) { // per-FACET colour: dark sapphire in shade, cyan faces, ice highlights on the upper facets facing the key light
+  const pts = [[0, -1.05 * r], [0.98 * r, 0.02 * r], [1.0 * r, 0.1 * r], [0.74 * r, 0.42 * r], [0.46 * r, 0.54 * r], [0, 0.54 * r]].map(([x, y]) => new THREE.Vector2(x, y));
+  const g = new THREE.LatheGeometry(pts, 10).toNonIndexed();
+  const p = g.attributes.position, col = new Float32Array(p.count * 3), a = new THREE.Color(cLo), b = new THREE.Color(cMid), c = new THREE.Color(cHi), o = new THREE.Color();
+  const L = new THREE.Vector3(-0.4, 0.8, 0.45).normalize(), n = new THREE.Vector3(), e1 = new THREE.Vector3(), e2 = new THREE.Vector3(), v = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  for (let f = 0; f < p.count; f += 3) {
+    for (let k = 0; k < 3; k++) v[k].fromBufferAttribute(p, f + k);
+    n.crossVectors(e1.subVectors(v[1], v[0]), e2.subVectors(v[2], v[0])).normalize();
+    const yc = (v[0].y + v[1].y + v[2].y) / 3, yN = (yc + 1.05 * r) / (1.59 * r);
+    const t = Math.min(1, Math.max(0, 0.5 * (n.dot(L) * 0.5 + 0.5) + 0.35 * hash(f * 0.37 + 2) + 0.3 * yN * yN - 0.05));
+    if (t < 0.5) o.copy(a).lerp(b, t / 0.5); else o.copy(b).lerp(c, Math.pow((t - 0.5) / 0.5, 2));
+    for (let k = 0; k < 3; k++) col.set([o.r, o.g, o.b], (f + k) * 3);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return g;
+}
+
 /** Brilliant-cut ruby (lathe, 8 facets, flat shaded), height along +y, girdle radius r. */
 function rubyGeometry(r) {
   const pts = [[0, -0.95 * r], [r, 0], [0.92 * r, 0.12 * r], [0.58 * r, 0.42 * r], [0, 0.42 * r]].map(([x, y]) => new THREE.Vector2(x, y));
@@ -59,8 +77,10 @@ export async function createDebris({ recipe, profile, scene, G }) {
   await RAPIER.init();
   const pal = recipe.palette;
   const [W, H, D] = recipe.object.size;
-  const look = { ...SHARD_LOOKS['gold-emerald'], ruby: makeRubyCap(pal, W / H) };
-  const mat = makeShardMaterial(makeGoldCast(pal), makeEmeraldCap(pal, W / H), look);
+  const volcanic = recipe.object.surfaceStyle === 'obsidian'; // volcanic glass shell + molten magma fracture faces (default: gold + emerald)
+  const mat = volcanic
+    ? makeShardMaterial(makeVolcanicObsidian(pal), makeMagmaCap(pal, W / H), SHARD_LOOKS['obsidian-magma'])
+    : makeShardMaterial(makeGoldCast(pal), makeEmeraldCap(pal, W / H), { ...SHARD_LOOKS['gold-emerald'], ruby: makeRubyCap(pal, W / H) });
   const rounds = recipe.v2.rounds;
   const chunkCap = Math.max(64, ...rounds.filter((r) => (r.tier ?? 1) < 4).map((r) => r.grid[0] * r.grid[1] * r.grid[2]));
   const big = instanced(chunkGeometry(4, 0.045), mat, 64, true);
@@ -68,13 +88,16 @@ export async function createDebris({ recipe, profile, scene, G }) {
   const grains = instanced(new THREE.BoxGeometry(1, 1, 1), mat, profile.maxShards ?? 8000, true);
   scene.add(big, chunks, grains);
 
-  const rp = { size: 0.2, color: '#8a001c', emissive: '#4a000f', emissiveIntensity: 0.27, ...(pal.ruby ?? {}) };
-  const ruby = new THREE.Mesh(rubyGeometry(rp.size), new THREE.MeshPhysicalMaterial({
-    color: rp.color, roughness: 0.08, metalness: 0.1, clearcoat: 1.0, clearcoatRoughness: 0.02, ior: 1.76, specularIntensity: 1,
-    specularColor: new THREE.Color('#ffffff'), emissive: rp.emissive, emissiveIntensity: rp.emissiveIntensity, envMapIntensity: 0.85, flatShading: true,
+  // anomaly gem (palette.ruby, name kept for recipe compatibility): ruby by default; shape "diamond" + gradient = faceted ice diamond
+  const rp = { size: 0.2, color: '#8a001c', emissive: '#4a000f', emissiveIntensity: 0.27, shape: 'ruby', roughness: 0.08, clearcoat: 1.0, ior: 1.76,
+    metalness: 0.1, envMapIntensity: 0.85, light: null, lightIntensity: 0.7, lightGather: 1.2, gradient: null, ...(pal.ruby ?? {}) };
+  const diamond = rp.shape === 'diamond';
+  const ruby = new THREE.Mesh(diamond ? diamondGeometry(rp.size, rp.gradient) : rubyGeometry(rp.size), new THREE.MeshPhysicalMaterial({
+    color: diamond ? 0xffffff : rp.color, vertexColors: diamond, roughness: rp.roughness, metalness: rp.metalness, clearcoat: rp.clearcoat, clearcoatRoughness: 0.02, ior: rp.ior, specularIntensity: 1,
+    specularColor: new THREE.Color('#ffffff'), emissive: rp.emissive, emissiveIntensity: rp.emissiveIntensity, envMapIntensity: rp.envMapIntensity, flatShading: true,
   }));
   ruby.castShadow = true; ruby.visible = false;
-  const rubyLight = new THREE.PointLight(rp.color, 0, 1.4, 2);
+  const rubyLight = new THREE.PointLight(rp.light ?? rp.color, 0, 1.4, 2);
   scene.add(ruby, rubyLight);
 
   const [TX, TZ] = LAYOUT.table.size;
@@ -322,7 +345,7 @@ export async function createDebris({ recipe, profile, scene, G }) {
         if (S.ruby && g.rubyP0) {
           const e = easeInOutCubic(u);
           ruby.position.set(g.rubyP0[0] * (1 - e), g.rubyP0[1] + (g.target.y - g.rubyP0[1]) * e, g.rubyP0[2] * (1 - e));
-          rubyLight.intensity = 1.2 * (1 - e);
+          rubyLight.intensity = rp.lightGather * (1 - e);
         }
         writeMatrices(S);
         return;
@@ -334,7 +357,7 @@ export async function createDebris({ recipe, profile, scene, G }) {
         ruby.position.set(...r.p).applyQuaternion(qa);
         ruby.quaternion.copy(r.q);
         rubyLight.position.copy(ruby.position).add(va.set(0.1, 0.35, 0.25));
-        rubyLight.intensity = 0.7;
+        rubyLight.intensity = rp.lightIntensity;
       }
       writeMatrices(S);
     },

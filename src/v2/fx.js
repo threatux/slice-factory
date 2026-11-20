@@ -81,15 +81,16 @@ export function createFx({ recipe, profile, scene, tl }) {
   const glow = pointCloud(sparks.length, THREE.AdditiveBlending, makeGlowTexture(), pxScale);
   const chips = pointCloud(crumbs.length, THREE.NormalBlending, makeGrainTexture(), pxScale);
   scene.add(glow.pts, chips.pts);
-  const [sc0, sc1] = (pal.sparkColors ?? ['#38e8ff', '#e0fcff']).map((c) => new THREE.Color(c));
-  const goldC = new THREE.Color(pal.shell), goldHi = new THREE.Color('#ffe9a8'), crumbC = new THREE.Color(pal.crumb);
+  const sparkCols = (pal.sparkColors ?? ['#38e8ff', '#e0fcff']).map((c) => new THREE.Color(c)); // 2 colours: lerp; 3 colours: ember ramp
+  const [sc0, sc1] = sparkCols, sc2 = sparkCols[2] ?? null;
+  const goldC = new THREE.Color(pal.sparkGold ?? pal.shell), goldHi = new THREE.Color(pal.crumbHi ?? '#ffe9a8'), crumbC = new THREE.Color(pal.crumb);
   const col = new THREE.Color();
   const GS = 7, GC = tl.G * 0.45;
 
   // ---------------- R6 dust avalanche ----------------
   const R6 = tl.rounds.find((r) => r.dust);
   const fin = recipe.v2.finale;
-  const ND = R6 ? profile.dustPoints ?? 10000 : 0;
+  const ND = R6 ? Math.round((profile.dustPoints ?? 10000) * (recipe.v2.dustScale ?? 1)) : 0; // recipe.v2.dustScale: denser R6 avalanche
   const dust = ND ? pointCloud(ND, THREE.NormalBlending, makeGrainTexture(), pxScale) : null;
   const dustGlint = ND ? pointCloud(Math.round(ND / 3), THREE.AdditiveBlending, makeGlowTexture(), pxScale) : null;
   if (dust) scene.add(dust.pts, dustGlint.pts);
@@ -102,7 +103,10 @@ export function createFx({ recipe, profile, scene, tl }) {
     const phi = Math.atan2(p0[2] + (h(4) - 0.5) * 0.6, p0[0] + (h(5) - 0.5) * 0.6) + (h(6) - 0.5) * 0.9;
     let rf = 0.6 + 2.7 * Math.pow(h(7), 0.8); // -25% reach vs the flat-carpet version
     const cx = Math.cos(phi), cz = Math.sin(phi);
-    rf = Math.min(rf, 3.2 / Math.max(1e-3, Math.abs(cx)), 2.3 / Math.max(1e-3, Math.abs(cz)));
+    if (recipe.v2.softEdge) { // no straight wall: compress reach smoothly against the elliptical table limit, +-25% scatter
+      const lim = 1 / Math.sqrt((cx / 3.2) ** 2 + (cz / 2.3) ** 2);
+      rf = lim * (1 - Math.exp(-rf / lim)) * (0.75 + 0.5 * h(19));
+    } else rf = Math.min(rf, 3.2 / Math.max(1e-3, Math.abs(cx)), 2.3 / Math.max(1e-3, Math.abs(cz)));
     let pick = h(8) * dsum, ci = 0;
     while (ci < dcols.length - 1 && pick > dcols[ci][1]) { pick -= dcols[ci][1]; ci++; }
     D6.push({
@@ -129,6 +133,7 @@ export function createFx({ recipe, profile, scene, tl }) {
   ring.rotation.x = -Math.PI / 2; ring.position.y = 0.012; ring.renderOrder = 2;
   scene.add(ring);
 
+  const glintRGB = pal.dustGlint ?? [1.4, 1.25, 0.8];
   const tmp = [0, 0, 0], tmp2 = [0, 0, 0];
   const hkW0 = tl.hook.end, hkW1 = tl.hook.whipEnd;
   return {
@@ -145,7 +150,8 @@ export function createFx({ recipe, profile, scene, tl }) {
         if (y < 0.004) { glow.col[i * 4 + 3] = 0; return; }
         glow.pos[i * 3] = s.p[0] + s.v[0] * tau; glow.pos[i * 3 + 1] = y; glow.pos[i * 3 + 2] = s.p[2] + s.v[2] * tau;
         const f = 1 - tau / s.life;
-        if (s.gold) col.copy(goldC).lerp(goldHi, s.hot).multiplyScalar(1.6); else col.copy(sc0).lerp(sc1, s.hot).multiplyScalar(1.5);
+        if (s.gold) col.copy(goldC).lerp(goldHi, s.hot).multiplyScalar(1.6); else if (sc2) (s.hot < 0.5 ? col.copy(sc0).lerp(sc1, s.hot * 2) : col.copy(sc1).lerp(sc2, s.hot * 2 - 1)).multiplyScalar(1.5);
+        else col.copy(sc0).lerp(sc1, s.hot).multiplyScalar(1.5);
         glow.col.set([col.r, col.g, col.b, f * f * (s.hook ? hkFade : 1)], i * 4);
         glow.size[i] = s.size * (0.6 + 0.4 * f);
       });
@@ -194,7 +200,7 @@ export function createFx({ recipe, profile, scene, tl }) {
           if (g.glint > 0.72 && gi < gN) { // metallic glints twinkling on top of the powder
             const sp = Math.pow(hash(i * 1.7 + Math.floor(t * 20) * 0.31), 6);
             dustGlint.pos.set([tmp[0], tmp[1] + 0.004, tmp[2]], gi * 3);
-            dustGlint.col.set([1.4, 1.25, 0.8, sp * a], gi * 4);
+            dustGlint.col.set([...glintRGB, sp * a], gi * 4);
             dustGlint.size[gi] = g.size * 2.4;
             gi++;
           }

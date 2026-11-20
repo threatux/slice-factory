@@ -9,6 +9,8 @@ Uses the live samples public/audio/{chop,crackle,whoosh}.wav (soft synthesis onl
   * pour rounds (R4/R5): chop.wav is DISABLED; layered stereo crackle stream (coarse/fine by round) + quiet blade hum
     at -20 dB, hard 120 ms fade at pour_end.
   * mastering: soft limiter + peak normalise to -1.0 dBFS.
+  * "slizzy_metal" / "slizzy_obsidian": v2.0 engine voices (obsidian = deeper stone sub 75->24 Hz, chop.wav 0.78-0.92x, HP 2.8 kHz
+    glass crack from crackle.wav, 400-900 Hz fire whoosh + heat crackle, stone clatter R1-R3 / glass scree R4-R6).
   * --audio-profile (recipe.audioProfile): "obsidian" (default, unchanged) | "metal_crystal" (gold bar / emerald core):
     R1-R2 heavy chop.wav (pitch 0.96-1.08, 120-260 Hz body accent) + dry emerald chip from crackle.wav (15-28 ms, HP 2.4 kHz, -8 dB);
     dense runs crossfade into HP 2.4 kHz crystal crumb (no synthetic sines anywhere); pour R4 pitch 0.98-1.10, R5 pitch 1.22-1.40 + 5-9 kHz accent;
@@ -29,6 +31,7 @@ TAU = 2.0 * math.pi
 AUDIO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'public', 'audio')
 POUR_FADE = 0.12
 PROFILE = 'obsidian'  # set from --audio-profile
+OBS = False  # True for 'slizzy_obsidian' (volcanic glass + stone timbre of the v2 engine)
 
 
 class Mix:
@@ -393,7 +396,29 @@ def air(rnd, dur, f_hp=4000.0, f_lp=10000.0, attack=0.03):
     return x
 
 
+def hot_whoosh(rnd, pitch, dur):
+    """slizzy_obsidian: denser 'fire' whoosh: whoosh.wav body band-limited to 400-900 Hz + a thin airy top (HP 1.2 kHz)."""
+    x = play(BANK['whoosh'], pitch) if BANK.get('whoosh') else biquad(noise(int(0.6 * SR), rnd), 'lp', 1800.0)
+    body = biquad(biquad(x, 'hp', 400.0), 'lp', 900.0)
+    top = biquad(x, 'hp', 1200.0)
+    n = min(len(x), int(dur * SR))
+    out = [1.6 * body[i] + 0.35 * top[i] for i in range(n)]
+    return fade_out(out, min(0.06, dur * 0.3))
+
+
+def heat_crackle(mix, rnd, t, inten, n=1):
+    """short crackle.wav 'heat' crackle (18-35 ms, HP 1.6 kHz, pitch 0.9-1.1)."""
+    for k in range(n):
+        mix.add(t + 0.011 * k, tick(rnd, 0.018, 0.035, 1600.0, (0.9, 1.1)), 0.42 * inten, rnd.uniform(-0.5, 0.5))
+
+
 def v2_slash(mix, t, inten, rnd):
+    if OBS:
+        mix.add(t - 0.09, hot_whoosh(rnd, rnd.uniform(1.0, 1.12), 0.34), 0.6 * inten, rnd.uniform(-0.3, 0.3))
+        heat_crackle(mix, rnd, t - 0.01, inten, 2)
+        mix.add(t, tick(rnd), 0.4 * inten, rnd.uniform(-0.2, 0.2))
+        STATS['v2_slash'] = STATS.get('v2_slash', 0) + 1
+        return
     mix.add(t - 0.09, hp_whoosh(rnd, rnd.uniform(1.15, 1.3), 0.32), 0.62 * inten, rnd.uniform(-0.3, 0.3))
     mix.add(t, tick(rnd), 0.55 * inten, rnd.uniform(-0.2, 0.2))
     if BANK.get('chop'):  # metallic "shink" transient: ultra-short, high-passed (no tonal body)
@@ -403,6 +428,13 @@ def v2_slash(mix, t, inten, rnd):
 
 
 def v2_fan(mix, t, inten, blades, rnd):
+    if OBS:
+        for k, (p, off, pan) in enumerate(((0.92, -0.015, -0.55), (1.05, 0.0, 0.0), (1.18, 0.012, 0.55))):
+            mix.add(t - 0.09 + off, hot_whoosh(rnd, p * rnd.uniform(0.97, 1.03), 0.38), (0.4 if k != 1 else 0.48) * inten, pan)
+        heat_crackle(mix, rnd, t - 0.02, inten, 4)
+        mix.add(t - 0.03, air(rnd, 0.38, 3000.0, 9000.0), 0.14 * inten * min(1.0, 0.5 + blades / 16.0), rnd.uniform(-0.2, 0.2))
+        STATS['v2_fan'] = STATS.get('v2_fan', 0) + 1
+        return
     for k, (p, off, pan) in enumerate(((1.0, -0.015, -0.55), (1.15, 0.0, 0.0), (1.3, 0.012, 0.55))):
         mix.add(t - 0.09 + off, hp_whoosh(rnd, p * rnd.uniform(0.97, 1.03), 0.36), (0.42 if k != 1 else 0.5) * inten, pan)
     for k in range(3):
@@ -411,7 +443,7 @@ def v2_fan(mix, t, inten, blades, rnd):
     STATS['v2_fan'] = STATS.get('v2_fan', 0) + 1
 
 
-def avalanche(rnd, length, density, fine):
+def avalanche(rnd, length, density, fine, glass=False):
     """Stereo ASMR cascade of crystal grains + silky metal-powder bed. Returns (L, R)."""
     n = int(length * SR) + int(0.2 * SR)
     L, R = [0.0] * n, [0.0] * n
@@ -427,7 +459,9 @@ def avalanche(rnd, length, density, fine):
     while tau < length:
         env = math.exp(-tau / (length * 0.38))
         pitch = rnd.uniform(1.1, 1.4) if fine else rnd.uniform(0.95, 1.25)
-        x = biquad(crackle(rnd, rnd.uniform(0.03, 0.09), pitch), 'hp', 1800.0 if fine else 1200.0)
+        if glass:  # crisp volcanic-glass scree
+            pitch = rnd.uniform(1.05, 1.3)
+        x = biquad(crackle(rnd, rnd.uniform(0.03, 0.09), pitch), 'hp', 2800.0 if glass else 1800.0 if fine else 1200.0)
         put(tau, fade_out(x, 0.01), 0.3 * env * rnd.uniform(0.5, 1.0), rnd.uniform(-0.85, 0.85))
         STATS['v2_grains'] = STATS.get('v2_grains', 0) + 1
         tau += rnd.uniform(0.5, 1.5) / (density * (0.25 + 0.75 * env))
@@ -441,28 +475,41 @@ def avalanche(rnd, length, density, fine):
     return L, R
 
 
+def chop_pitch(rnd, lo, hi=None):
+    """chop.wav pitch: original range (slizzy_metal, identical rnd use) or the lower, heavier 0.78-0.92x (slizzy_obsidian)."""
+    if OBS:
+        return rnd.uniform(0.78, 0.92)
+    return lo if hi is None else rnd.uniform(lo, hi)
+
+
 def v2_impact(mix, t, tier, rnd):
     boost = 10 ** (2.5 / 20) if tier <= 1 else 1.0  # R1 punch: +2.5 dB (master re-normalises to -1.0 dBFS, soft limiter = no clipping)
-    mix.add(t, sweep_sine(85.0, 28.0, 0.55, rate=5.0, decay=6.0), (0.9 + 0.1 * min(tier, 4)) * boost)
+    if OBS:  # deeper, heavier stone sub
+        mix.add(t, sweep_sine(75.0, 24.0, 0.65, rate=5.0, decay=5.0), (0.95 + 0.1 * min(tier, 4)) * boost)
+    else:
+        mix.add(t, sweep_sine(85.0, 28.0, 0.55, rate=5.0, decay=6.0), (0.9 + 0.1 * min(tier, 4)) * boost)
     chop = BANK.get('chop')
     aval = None
+    if OBS:  # dry, sharp obsidian glass crack (crackle.wav, HP 2.8 kHz, pitch 1.05-1.30)
+        mix.add(t, fade_out(biquad(crackle(rnd, 0.03, rnd.uniform(1.05, 1.3)), 'hp', 2800.0), 0.01), 0.7 * boost)
+        mix.add(t + 0.012, fade_out(biquad(crackle(rnd, 0.022, rnd.uniform(1.05, 1.3)), 'hp', 2800.0), 0.008), 0.4 * boost, rnd.uniform(-0.5, 0.5))
     if tier <= 1:  # two heavy dull chop.wav knocks (halves) + dry crystal crunch from crackle.wav; no tonal synthesis
         if chop:
-            mix.add(t, biquad(fade_out(play(chop, rnd.uniform(0.85, 0.9)), 0.1), 'lp', 2200.0), 0.85 * boost, -0.2)
-            mix.add(t + 0.070, biquad(fade_out(play(chop, rnd.uniform(0.93, 0.98)), 0.1), 'lp', 2200.0), 0.65 * boost, 0.25)
+            mix.add(t, biquad(fade_out(play(chop, chop_pitch(rnd, 0.85, 0.9)), 0.1), 'lp', 2200.0), 0.85 * boost, -0.2)
+            mix.add(t + 0.070, biquad(fade_out(play(chop, chop_pitch(rnd, 0.93, 0.98)), 0.1), 'lp', 2200.0), 0.65 * boost, 0.25)
             # extra attack: 9 ms bright chop.wav transient (HP 900 Hz) on the very first sample of the hit
             mix.add(t, biquad(fade_out(play(chop, 1.25, 0.0, 0.009), 0.004), 'hp', 900.0), 0.55 * boost)
         mix.add(t, fade_out(biquad(crackle(rnd, 0.035, 1.0), 'hp', 2200.0), 0.012), 0.55 * boost)
     elif tier == 2:  # dense sub + cascade of real chop.wav hits (pitch 0.95-1.20) + decaying crackle.wav scatter
         if chop:
-            mix.add(t, biquad(fade_out(play(chop, 0.95), 0.1), 'lp', 3000.0), 0.8)
+            mix.add(t, biquad(fade_out(play(chop, chop_pitch(rnd, 0.95)), 0.1), 'lp', 3000.0), 0.8)
             for k in range(5):
-                mix.add(t + rnd.uniform(0.03, 0.3), biquad(fade_out(play(chop, rnd.uniform(0.95, 1.2), 0.0, 0.12), 0.05), 'lp', 3200.0),
+                mix.add(t + rnd.uniform(0.03, 0.3), biquad(fade_out(play(chop, chop_pitch(rnd, 0.95, 1.2), 0.0, 0.12), 0.05), 'lp', 3200.0),
                         0.34 * math.exp(-k / 4.0), rnd.uniform(-0.6, 0.6))
         dt = 0.0
         for k in range(16):
             dt += rnd.uniform(0.01, 0.06) * (1 + k * 0.12)
-            mix.add(t + dt, fade_out(biquad(crackle(rnd, rnd.uniform(0.02, 0.045), rnd.uniform(0.95, 1.1)), 'hp', 1800.0), 0.01),
+            mix.add(t + dt, fade_out(biquad(crackle(rnd, rnd.uniform(0.02, 0.045), rnd.uniform(1.05, 1.3) if OBS else rnd.uniform(0.95, 1.1)), 'hp', 2800.0 if OBS else 1800.0), 0.01),
                     0.5 * math.exp(-dt / 0.4), rnd.uniform(-0.75, 0.75))
     else:  # mighty bass hit + wide rustling avalanche of crystals and metal powder
         n = int(0.35 * SR)
@@ -471,9 +518,9 @@ def v2_impact(mix, t, tier, rnd):
             boom[i] *= math.exp(-(i / SR) / 0.09)
         mix.add(t, boom, 2.2)
         if chop:
-            mix.add(t, biquad(fade_out(play(chop, 0.7), 0.08), 'lp', 2000.0), 0.6)
+            mix.add(t, biquad(fade_out(play(chop, chop_pitch(rnd, 0.7) if OBS else 0.7), 0.08), 'lp', 2000.0), 0.6)
         length = 3.4 if tier >= 4 else 1.9
-        aval = avalanche(rnd, length, 220.0 if tier >= 4 else 140.0, tier >= 4)
+        aval = avalanche(rnd, length, 220.0 if tier >= 4 else 140.0, tier >= 4, glass=OBS)
         i0 = int((t + 0.01) * SR)
         for k in range(min(len(aval[0]), mix.n - i0)):
             mix.L[i0 + k] += aval[0][k]
@@ -482,7 +529,18 @@ def v2_impact(mix, t, tier, rnd):
     return aval
 
 
-def v2_clatter(mix, t, count, inten, rnd):
+def v2_clatter(mix, t, count, inten, rnd, rnd_idx=0):
+    if OBS:
+        if rnd_idx <= 2:  # R1-R3: heavy stone clatter (low crackle ticks + dull chop.wav knock)
+            for _ in range(min(3, count)):
+                mix.add(t + rnd.uniform(0.0, 0.016), tick(rnd, 0.018, 0.034, 900.0, (0.78, 0.92)), (0.12 + 0.26 * inten), rnd.uniform(-0.7, 0.7))
+            if inten > 0.35 and BANK.get('chop'):
+                mix.add(t, biquad(fade_out(play(BANK['chop'], rnd.uniform(0.78, 0.92), 0.0, 0.09), 0.035), 'lp', 1500.0), 0.2 * inten, rnd.uniform(-0.5, 0.5))
+        else:  # R4-R6: crisp volcanic-glass scree
+            for _ in range(min(2, count)):
+                mix.add(t + rnd.uniform(0.0, 0.012), tick(rnd, 0.012, 0.024, 2800.0, (1.05, 1.3)), 0.07 + 0.14 * inten, rnd.uniform(-0.8, 0.8))
+        STATS['v2_clatter'] = STATS.get('v2_clatter', 0) + 1
+        return
     for _ in range(min(3, count)):
         mix.add(t + rnd.uniform(0.0, 0.016), tick(rnd, 0.015, 0.03, 1500.0, (0.95, 1.05)), (0.1 + 0.22 * inten), rnd.uniform(-0.7, 0.7))
     if inten > 0.5 and BANK.get('chop'):
@@ -548,7 +606,9 @@ def main_v2(events, a):
                 aval_last = av
         elif ty == 'clatter':
             if e.get('round', -1) in (0, 1, 2):
-                v2_clatter(mix, t, int(e.get('count', 1)), inten, rnd)
+                v2_clatter(mix, t, int(e.get('count', 1)), inten, rnd, e.get('round', 0))
+            elif OBS and e.get('round', -1) in (3, 4, 5) and rnd.random() < 0.5:
+                v2_clatter(mix, t, int(e.get('count', 1)), inten, rnd, e.get('round', 3))
         elif ty == 'transition':
             v2_whoosh(mix, t, 0.25, 0.32, 1.25, rnd)
         elif ty == 'whip':
@@ -598,10 +658,11 @@ def main():
     ap.add_argument('--tail', type=float, default=1.0, help='extra seconds after last event')
     ap.add_argument('--duration', type=float, default=None, help='force total length in seconds')
     ap.add_argument('--seed', type=int, default=7)
-    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal'], default='obsidian', help='recipe.audioProfile')
+    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal', 'slizzy_obsidian'], default='obsidian', help='recipe.audioProfile')
     a = ap.parse_args()
-    global PROFILE
+    global PROFILE, OBS
     PROFILE = a.audio_profile
+    OBS = PROFILE == 'slizzy_obsidian'
 
     with open(a.events, encoding='utf-8') as f:
         events = sorted(json.load(f), key=lambda e: e['time'])
@@ -610,7 +671,7 @@ def main():
         BANK[key] = load_sample(key + '.wav')
     print(f'audio profile: {PROFILE}')
     print('samples: ' + ', '.join(f'{k}={"live " + os.path.basename(v["path"]) if v else "synth fallback"}' for k, v in BANK.items()))
-    if PROFILE == 'slizzy_metal':
+    if PROFILE in ('slizzy_metal', 'slizzy_obsidian'):
         mix, total, pauses = main_v2(events, a)
     else:
         total = a.duration if a.duration else (max((e['time'] for e in events), default=0.0) + a.tail + 0.6)
@@ -632,7 +693,7 @@ def main():
         w = windows.get(e['round'])
         return e.get('phase') == 'pour' or (w is not None and w[0] - 0.05 <= e['time'] <= w[1] + POUR_FADE)
 
-    for e in (events if PROFILE != 'slizzy_metal' else []):
+    for e in (events if PROFILE not in ('slizzy_metal', 'slizzy_obsidian') else []):
         t, ty, inten, tool = e['time'], e['type'], float(e.get('intensity', 1.0)), e.get('tool', '')
         if ty == 'drop':
             voice_drop(mix, t, inten, rnd)
