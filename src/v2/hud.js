@@ -32,7 +32,11 @@ export function createHudV2(profile, recipe, tl) {
       background: linear-gradient(90deg, ${hc.badgeFrom}, ${hc.badgeTo}); box-shadow: 0 calc(var(--h) * .004) calc(var(--h) * .02) rgba(0,0,0,.55); }
     #v2 #v2-final { top: 22%; font-size: calc(var(--h) * .047); line-height: 1.05; }
     #v2-flash { position: absolute; inset: 0; background: #fff; opacity: 0; mix-blend-mode: screen; }
-  `;
+  ` + (hc.textShadowStrong ? `
+    #v2 #v2-count, #v2 #v2-final { text-shadow: 0 0 calc(var(--h) * .006) rgba(0,8,20,.95), 0 0 calc(var(--h) * .018) rgba(0,8,20,.9),
+      0 0 calc(var(--h) * .036) rgba(0,8,20,.75), 0 calc(var(--h) * .003) calc(var(--h) * .005) rgba(0,0,0,.95); }
+    #v2 #v2-label.bonus { filter: drop-shadow(0 0 calc(var(--h) * .006) rgba(0,8,20,.95)) drop-shadow(0 0 calc(var(--h) * .02) rgba(0,8,20,.8)); }
+  ` : '');
   document.head.appendChild(css);
   const root = document.createElement('div');
   root.id = 'v2';

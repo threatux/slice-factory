@@ -53,6 +53,46 @@ void earthLayer(vec3 p, float R, float glow, out vec3 alb, out vec3 emi, out flo
   rough = mix(mix(0.62, 0.45, wO), 0.92, wC);
 }`;
 
+export const CRYO_LAYERS = {
+  crust: ['#072c50', '#0f5c91'], frost: '#cfefff', cobalt: ['#0a2472', '#0284c7'], veins: ['#38bdf8', '#00f5d4'],
+  plasma: ['#00b4d8', '#00f5d4'], core: ['#ccf7ff', '#ffffff'], bounds: [0.84, 0.48, 0.22],
+};
+const CL = CRYO_LAYERS;
+/**
+ * coreStyle "cryo-plasma": same signature as earthLayer (shared noise helpers), r = |p| / R:
+ * crust 0.84-1.00 dark glacial blue + thin frost cracks; cobalt / indigo 0.48-0.84 with branching cryo veins (emission on the
+ * veins only); turquoise plasma 0.22-0.48 (capped emission keeps the noise relief); ice-white energy core < 0.22.
+ */
+const CRYO_GLSL = LAYER_GLSL.slice(0, LAYER_GLSL.indexOf('void earthLayer')) + `void earthLayer(vec3 p, float R, float glow, out vec3 alb, out vec3 emi, out float rough) {
+  vec3 q = p / R;
+  float n = eF(q * 6.0);
+  float r = length(q) + (n - 0.5) * 0.03;
+  float v1 = 1.0 - abs(2.0 * eF(q * 4.2 + vec3(n * 1.9)) - 1.0);
+  float v2 = 1.0 - abs(2.0 * eF(q * 10.5 + vec3(n * 2.7) + 3.1) - 1.0);
+  float vein = max(smoothstep(0.86, 0.975, v1), smoothstep(0.9, 0.985, v2) * 0.6);
+  float crk = smoothstep(0.93, 0.985, 1.0 - abs(2.0 * eF(q * 5.5 + vec3(n * 2.5)) - 1.0));
+  vec3 crust = mix(${glsl3(CL.crust[0])}, ${glsl3(CL.crust[1])}, smoothstep(0.25, 0.75, n)) * (0.85 + 0.3 * eF(q * 16.0));
+  crust = mix(crust, ${glsl3(CL.frost)}, crk * 0.28);
+  float tm = clamp((0.84 - r) / 0.36, 0.0, 1.0);
+  vec3 cob = mix(${glsl3(CL.cobalt[0])}, ${glsl3(CL.cobalt[1])}, smoothstep(0.05, 1.0, tm)) * (0.7 + 0.5 * n);
+  vec3 vc = mix(${glsl3(CL.veins[0])}, ${glsl3(CL.veins[1])}, smoothstep(0.2, 1.0, tm));
+  float tp = clamp((0.48 - r) / 0.26, 0.0, 1.0);
+  vec3 pl = mix(${glsl3(CL.plasma[0])}, ${glsl3(CL.plasma[1])}, smoothstep(0.0, 1.0, tp));
+  vec3 ic = mix(${glsl3(CL.core[0])}, ${glsl3(CL.core[1])}, 0.75 * smoothstep(0.22, 0.0, r));
+  float wC = smoothstep(0.83, 0.85, r);
+  float wP = smoothstep(0.49, 0.47, r);
+  float wI = smoothstep(0.225, 0.205, r);
+  vec3 mAlb = mix(cob, vc * 0.55, vein), mEmi = vc * vein * 0.75;
+  float pn = eF(q * 14.0 + vec3(n));
+  vec3 pAlb = pl * (0.2 + 0.25 * pn), pEmi = pl * (0.2 + 0.42 * pn) * (0.85 + 0.35 * vein);
+  float cn = eF(q * 22.0 + vec3(pn * 2.0));
+  vec3 iAlb = ic * (0.16 + 0.22 * cn), iEmi = ic * (0.16 + 0.3 * cn);
+  vec3 cEmi = ${glsl3(CL.veins[0])} * crk * 0.1;
+  alb = mix(mix(mix(mAlb, pAlb, wP), iAlb, wI), crust, wC);
+  emi = mix(mix(mix(mEmi, pEmi, wP), iEmi, wI), cEmi, wC) * glow;
+  rough = mix(mix(mix(mix(0.62, 0.5, vein), 0.55, wP), 0.5, wI), mix(0.5, 0.68, crk), wC);
+}`;
+
 /** R1-R3 piece material: Earth skin (uv) on the outside, layered interior on aCap faces (aSph = sphere-local position). */
 export function makeLayeredPieceMaterial(earth, R, glow = 1) {
   const mat = new THREE.MeshPhysicalMaterial({
@@ -77,6 +117,68 @@ diffuseColor.rgb = mix(diffuseColor.rgb, eAlb, eCap);`)
   };
   mat.customProgramCacheKey = () => 'earth-piece-v1';
   return mat;
+}
+
+/**
+ * coreStyle "cryo-plasma" piece material: glacial ice skin (uv: map / rough / bump / emissive cracks, clearcoat) outside,
+ * cryo layers on aCap faces. Emission is replaced (not added) on caps so the skin crack map never bleeds onto a cut face.
+ */
+export function makeCryoPieceMaterial(ice, R, glow = 1, o = {}) {
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, map: ice.map, roughnessMap: ice.roughnessMap, bumpMap: ice.bumpMap, bumpScale: o.bump ?? 1.2, roughness: 1, metalness: 0,
+    clearcoat: o.clearcoat ?? 1.0, clearcoatRoughness: o.clearcoatRoughness ?? 0.06, envMapIntensity: o.envMapIntensity ?? 1.0,
+    emissive: 0xffffff, emissiveMap: ice.emissiveMap, emissiveIntensity: o.crackGlow ?? 0.6,
+  });
+  const U = { uER: { value: R }, uEGlow: { value: glow } };
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 aSph; attribute float aCap; varying vec3 vESph; varying float vECap;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvESph = aSph; vECap = aCap;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nuniform float uER, uEGlow; varying vec3 vESph; varying float vECap;\n${CRYO_GLSL}`)
+      .replace('#include <map_fragment>', `#include <map_fragment>
+vec3 eAlb, eEmi; float eRough;
+earthLayer(vESph, uER, uEGlow, eAlb, eEmi, eRough);
+float eCap = step(0.5, vECap);
+diffuseColor.rgb = mix(diffuseColor.rgb, eAlb, eCap);`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, eRough, eCap);')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance = mix(totalEmissiveRadiance, eEmi, eCap);')
+      .replace('#include <lights_physical_fragment>', '#include <lights_physical_fragment>\nmaterial.clearcoat *= 1.0 - eCap;');
+  };
+  mat.customProgramCacheKey = () => 'cryo-piece-v1';
+  return mat;
+}
+
+/** coreStyle "cryo-plasma" micro pieces: every piece evaluates the cryo layers at its true sphere-local position (textured
+ * shards, never flat cubes); instance colour = brightness jitter, aHeat = emission jitter. */
+export function makeCryoGrainMaterial(R, glow = 1) {
+  const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.2, metalness: 0.0, clearcoat: 0.3, clearcoatRoughness: 0.1, envMapIntensity: 0.9 });
+  const U = { uER: { value: R }, uEGlow: { value: glow }, uCell: { value: 0.1 } };
+  mat.userData.uniforms = U;
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute float aHeat; attribute vec3 aOutP; uniform float uCell; varying float vGHeat; varying vec3 vGP;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGHeat = aHeat; vGP = aOutP + position * uCell;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>\nuniform float uER, uEGlow; varying float vGHeat; varying vec3 vGP;\n${CRYO_GLSL}`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+vec3 gAlb, gEmi; float gRough;
+earthLayer(vGP, uER, uEGlow, gAlb, gEmi, gRough);
+diffuseColor.rgb = gAlb * diffuseColor.rgb;`)
+      .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = gRough;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += gEmi * vGHeat;');
+  };
+  mat.customProgramCacheKey = () => 'cryo-grain-v1';
+  return mat;
+}
+/** Cryo micro piece look: brightness jitter (instance colour) + emission jitter (aHeat); colour itself comes from the shader. */
+export function cryoGrainLook(rf, surf, hash, out) {
+  const k = 0.88 + 0.24 * hash;
+  out.color.setRGB(k, k, k);
+  out.heat = rf > CL.bounds[0] - 0.02 ? 0.9 + 0.6 * (surf?.crack ?? 0) : 0.85 + 0.3 * hash;
+  return out;
 }
 
 /**

@@ -909,3 +909,66 @@ export function makeEarth(opts = {}) {
   earthCache.set(key, out);
   return out;
 }
+
+// ======================================================================================================
+// Cryo ice look (recipe.object.surfaceStyle = "cryo-ice", sphere only). Planet Earth paths above are untouched.
+// ======================================================================================================
+const iceCache = new Map();
+/**
+ * Deep glacial ice sphere, equirectangular 2048x1024 (same uv convention / 3D noise as makeEarth: no dateline seam).
+ * Base: saturated dark glacier blue #052645 -> #0b4f82 -> #1274b5 (kept dark so cracks + plasma read on it, never a flat white ball);
+ * sharp fracture lines #a5f3fc -> #e0f7ff with a faint inner-scatter halo, rare matte frost patches.
+ * Returns { map, roughnessMap (gloss 0.06-0.14, frost / cracks 0.50-0.65), bumpMap (grooves along the fractures),
+ * emissiveMap (cyan glow inside the major fractures only), sample(dir) -> { rgb, cloud: 0, crack } }.
+ */
+export function makeCryoIce(opts = {}) {
+  const seed = opts.seed ?? 19, crackAmt = opts.cracks ?? 1, frostAmt = opts.frost ?? 1;
+  const key = `ice|${seed}|${crackAmt}|${frostAmt}`;
+  if (iceCache.has(key)) return iceCache.get(key);
+  const W = 2048, H = 1024, N = W * H;
+  const C = (h) => srgbBytes(h);
+  const b0 = C('#052645'), b1 = C('#0b4f82'), b2 = C('#1274b5'), halo = C('#1a86c9'), frostC = C('#8fbfd8'), k0 = C('#a5f3fc'), k1 = C('#e0f7ff');
+  const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const col = new Uint8ClampedArray(N * 3), rough = new Uint8ClampedArray(N), bump = new Uint8ClampedArray(N), emi = new Uint8ClampedArray(N), crk = new Uint8ClampedArray(N);
+  for (let y = 0, j = 0; y < H; y++) for (let x = 0; x < W; x++, j++) {
+    const th = ((y + 0.5) / H) * Math.PI, ph = ((x + 0.5) / W) * 2 * Math.PI, s = Math.sin(th);
+    const dx = -Math.cos(ph) * s, dy = Math.cos(th), dz = Math.sin(ph) * s;
+    const wx = fbm3(dx * 1.6 + 3.7, dy * 1.6, dz * 1.6, seed + 3, 3) - 0.5, wz = fbm3(dx * 1.6, dy * 1.6 + 7.1, dz * 1.6, seed + 5, 3) - 0.5;
+    const n = fbm3(dx * 2.2 + wx * 1.4, dy * 2.2 + (wx + wz) * 0.7, dz * 2.2 + wz * 1.4, seed + 11, 5);
+    const det = fbm3(dx * 26, dy * 26, dz * 26, seed + 41, 2);
+    // major fracture network (ridged, warped) + fine secondary cracks
+    const r1 = 1 - Math.abs(2 * fbm3(dx * 2.6 + wx * 2.2, dy * 2.6 + wz * 2.2, dz * 2.6 - wx * 1.5, seed + 21, 4) - 1);
+    const r2 = 1 - Math.abs(2 * fbm3(dx * 8.5 + wz * 3, dy * 8.5 + wx * 3, dz * 8.5, seed + 23, 3) - 1);
+    const c1 = sstep(0.958, 0.992, r1) * crackAmt, c2 = sstep(0.975, 0.996, r2) * 0.4 * crackAmt, ck = Math.min(1, Math.max(c1, c2));
+    const hl = sstep(0.86, 0.97, r1) * 0.3 * crackAmt;
+    const frost = sstep(0.7, 0.8, fbm3(dx * 4.2 + 11, dy * 4.2, dz * 4.2, seed + 31, 4)) * (0.55 + 0.45 * det) * frostAmt;
+    let c = n < 0.5 ? mix(b0, b1, sstep(0.3, 0.5, n)) : mix(b1, b2, sstep(0.5, 0.72, n));
+    const k = 0.9 + 0.18 * det; c = c.map((v) => v * k);
+    c = mix(c, halo, hl);
+    c = mix(c, frostC, frost * 0.55);
+    c = mix(c, mix(k0, k1, sstep(0.5, 1, ck)), ck);
+    col[j * 3] = c[0]; col[j * 3 + 1] = c[1]; col[j * 3 + 2] = c[2];
+    const rg = 0.06 + 0.08 * det, rf = 0.5 + 0.15 * det;
+    rough[j] = (rg + (rf - rg) * Math.max(frost, ck)) * 255;
+    bump[j] = clamp(0.55 + 0.12 * (n - 0.5) + 0.06 * frost - 0.5 * ck, 0, 1) * 255;
+    emi[j] = clamp(c1 * 0.85 + hl * 0.18, 0, 1) * 255;
+    crk[j] = ck * 255;
+  }
+  const [e0, e1, e2] = C('#38bdf8');
+  const map = pixelData(W, H, (x, y) => { const j = (y * W + x) * 3; return [col[j], col[j + 1], col[j + 2]]; });
+  const roughnessMap = pixelData(W, H, (x, y) => { const v = rough[y * W + x]; return [v, v, v]; }, false);
+  const bumpMap = pixelData(W, H, (x, y) => { const v = bump[y * W + x]; return [v, v, v]; }, false);
+  const emissiveMap = pixelData(W, H, (x, y) => { const v = emi[y * W + x] / 255; return [e0 * v, e1 * v, e2 * v]; });
+  const sample = (dx, dy, dz) => {
+    const l = Math.hypot(dx, dy, dz) || 1;
+    let ph = Math.atan2(dz, -dx); ph = ((ph % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const th = Math.acos(Math.max(-1, Math.min(1, dy / l)));
+    const x = Math.min(W - 1, Math.floor((ph / (2 * Math.PI)) * W)), y = Math.min(H - 1, Math.floor((th / Math.PI) * H));
+    const j = y * W + x;
+    return { rgb: [col[j * 3], col[j * 3 + 1], col[j * 3 + 2]], cloud: 0, crack: crk[j] / 255 };
+  };
+  for (const t of [map, roughnessMap, bumpMap, emissiveMap]) t.wrapS = THREE.RepeatWrapping;
+  const out = { map, roughnessMap, bumpMap, emissiveMap, sample };
+  iceCache.set(key, out);
+  return out;
+}

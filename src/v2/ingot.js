@@ -2,7 +2,7 @@
 // X/Y/Z seam lines computed in the fragment shader from object-space position (no decal geometry -> no Z-fighting).
 import * as THREE from 'three';
 import { blockGeometry, addIngotDecals } from '../objects.js';
-import { makeGoldCast, makeIngotDecals, makeVolcanicObsidian, makeEarth } from '../textures.js';
+import { makeGoldCast, makeIngotDecals, makeVolcanicObsidian, makeEarth, makeCryoIce } from '../textures.js';
 import { makeAtmosphere } from './earth.js';
 
 /**
@@ -70,10 +70,17 @@ function createPlanet(recipe) {
   const R = cfg.size[0] / 2;
   const seamCfg = { width: 0.024, glow: 2.4, flash: 5, ...(recipe.v2.seam ?? {}) };
   const [c1, c2] = pal.seam ?? ['#fff3c4', '#ff5e00'];
-  const ec = { lon: 0, seed: 7, land: 0.34, bump: 1.6, clouds: 0.85, atmosphere: '#4cc9f0', atmoStrength: 1, ...(cfg.earth ?? {}) };
-  const earth = makeEarth(ec);
+  const ice = cfg.surfaceStyle === 'cryo-ice'; // glacial ice skin (object.ice) instead of the Earth maps; Earth defaults untouched
+  const ec = ice
+    ? { bump: 1.2, crackGlow: 0.6, clearcoat: 1.0, clearcoatRoughness: 0.06, rim: '#38bdf8', rimStrength: 0.35, halo: false, ...(cfg.ice ?? {}) }
+    : { lon: 0, seed: 7, land: 0.34, bump: 1.6, clouds: 0.85, atmosphere: '#4cc9f0', atmoStrength: 1, ...(cfg.earth ?? {}) };
+  const earth = ice ? makeCryoIce(ec) : makeEarth(ec);
   const frame = new THREE.Group();
-  const mat = new THREE.MeshPhysicalMaterial({
+  const mat = ice ? new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, map: earth.map, roughnessMap: earth.roughnessMap, bumpMap: earth.bumpMap, bumpScale: ec.bump, roughness: 1, metalness: 0,
+    clearcoat: ec.clearcoat, clearcoatRoughness: ec.clearcoatRoughness, envMapIntensity: ec.envMapIntensity ?? 1.0,
+    emissive: 0xffffff, emissiveMap: earth.emissiveMap, emissiveIntensity: ec.crackGlow,
+  }) : new THREE.MeshPhysicalMaterial({
     color: 0xffffff, map: earth.map, roughnessMap: earth.roughnessMap, bumpMap: earth.bumpMap, bumpScale: ec.bump, roughness: 1, metalness: 0,
     clearcoat: 0.0, envMapIntensity: 1.0,
   });
@@ -87,6 +94,12 @@ function createPlanet(recipe) {
   addSeams(mat, U);
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(R, 192, 96), mat);
   mesh.castShadow = mesh.receiveShadow = true;
+  if (ice || cfg.clouds === false) { // no cloud shell; cold Fresnel rim only (halo shell optional -> no soap-bubble ring)
+    const atmo = makeAtmosphere(R, ec.rim ?? ec.atmosphere, ec.rimStrength ?? ec.atmoStrength);
+    const extras = ec.halo ? [atmo.halo, atmo.limb] : [atmo.limb];
+    frame.add(mesh, ...extras);
+    return planetApi(frame, mesh, R, earth, extras, U, seamCfg);
+  }
   const cloudMat = new THREE.MeshStandardMaterial({
     color: 0xffffff, alphaMap: earth.clouds, transparent: true, opacity: ec.clouds, roughness: 0.9, metalness: 0, depthWrite: false,
   });
@@ -96,6 +109,28 @@ function createPlanet(recipe) {
   const atmo = makeAtmosphere(R, ec.atmosphere, ec.atmoStrength);
   frame.add(mesh, clouds, atmo.halo, atmo.limb);
   const extras = [clouds, atmo.halo, atmo.limb];
+  return {
+    frame, mesh, size: [2 * R, 2 * R, 2 * R], earth,
+    setPose(y, yaw) { frame.position.set(0, y, 0); frame.rotation.set(0, yaw, 0); frame.updateMatrixWorld(true); },
+    setVisible(v) { mesh.visible = v; for (const e of extras) e.visible = v; },
+    setSeams(s) {
+      const [nx, ny, nz] = s.grid;
+      U.uSN.value.set(nx, ny, nz);
+      U.uSLo.value.set(s.axes[0].lo, s.axes[1].lo, s.axes[2].lo);
+      U.uSHi.value.set(s.axes[0].hi, s.axes[1].hi, s.axes[2].hi);
+      U.uSRev.value.set(s.axes[0].rev, s.axes[1].rev, s.axes[2].rev);
+      U.uSFlash.value.set(s.axes[0].flash, s.axes[1].flash, s.axes[2].flash);
+      const w = (n) => seamCfg.width / Math.sqrt(Math.max(1, n - 1)) + 0.0035;
+      U.uSW.value.set(w(nx), w(ny), w(nz));
+      const dens = Math.max(nx, ny, nz);
+      U.uSGlow.value = seamCfg.glow * s.pulse * (dens > 10 ? 0.8 : 1);
+      U.uSAlpha.value = s.alpha;
+    },
+  };
+}
+
+/** Planet API for the cloud-less sphere looks (identical behaviour to the Earth object above). */
+function planetApi(frame, mesh, R, earth, extras, U, seamCfg) {
   return {
     frame, mesh, size: [2 * R, 2 * R, 2 * R], earth,
     setPose(y, yaw) { frame.position.set(0, y, 0); frame.rotation.set(0, yaw, 0); frame.updateMatrixWorld(true); },

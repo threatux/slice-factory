@@ -14,6 +14,9 @@ Uses the live samples public/audio/{chop,crackle,whoosh}.wav (soft synthesis onl
   * "slizzy_earth" (Planet Earth): tectonic sub 60->22 Hz, heavy stone split (chop.wav 0.72-0.86x, LP), dense magma hiss +
     falling-rock crackle (crackle.wav), deep 'energy' whoosh fans (whoosh.wav 0.74-0.98x, 220-950 Hz body). slizzy_metal /
     slizzy_obsidian code paths are untouched (EARTH branches only).
+  * "slizzy_ice" (Cryo Ice Sphere): dense dry ice-block impact (sub 85->28 Hz + chop.wav 1.04-1.16x LP + crisp glass-ice split
+    from crackle.wav HP 2.4 kHz 1.12-1.30x), frosty slashes (whoosh.wav 1.0-2.4 kHz body + 15-22 ms crackle.wav freeze click),
+    ringing ice-chunk clatter R1-R3 / crisp ice-crumb scree R4-R6. ICE branches only: metal / obsidian / earth paths untouched.
   * --audio-profile (recipe.audioProfile): "obsidian" (default, unchanged) | "metal_crystal" (gold bar / emerald core):
     R1-R2 heavy chop.wav (pitch 0.96-1.08, 120-260 Hz body accent) + dry emerald chip from crackle.wav (15-28 ms, HP 2.4 kHz, -8 dB);
     dense runs crossfade into HP 2.4 kHz crystal crumb (no synthetic sines anywhere); pour R4 pitch 0.98-1.10, R5 pitch 1.22-1.40 + 5-9 kHz accent;
@@ -36,6 +39,7 @@ POUR_FADE = 0.12
 PROFILE = 'obsidian'  # set from --audio-profile
 OBS = False  # True for 'slizzy_obsidian' (volcanic glass + stone timbre of the v2 engine)
 EARTH = False  # True for 'slizzy_earth' (tectonic planet split + magma)
+ICE = False  # True for 'slizzy_ice' (cryo ice sphere: dry ice block + glassy ice crunch)
 
 
 class Mix:
@@ -420,6 +424,27 @@ def deep_whoosh(rnd, pitch, dur):
     return fade_out(out, min(0.07, dur * 0.3))
 
 
+def frost_whoosh(rnd, pitch, dur):
+    """slizzy_ice: sharp frosty cutting whistle: whoosh.wav with its 1.0-2.4 kHz band accented + thin airy top (HP 2.4 kHz)."""
+    x = play(BANK['whoosh'], pitch) if BANK.get('whoosh') else biquad(noise(int(0.6 * SR), rnd), 'lp', 2400.0)
+    body = biquad(biquad(x, 'hp', 1000.0), 'lp', 2400.0)
+    top = biquad(x, 'hp', 2400.0)
+    low = biquad(x, 'lp', 1000.0)
+    n = min(len(x), int(dur * SR))
+    out = [1.7 * body[i] + 0.3 * top[i] + 0.25 * low[i] for i in range(n)]
+    return fade_out(out, min(0.05, dur * 0.3))
+
+
+def freeze_click(rnd):
+    """slizzy_ice: short dry freeze click (crackle.wav 15-22 ms, HP 2.4 kHz, pitch 1.12-1.30)."""
+    return tick(rnd, 0.015, 0.022, 2400.0, (1.12, 1.3))
+
+
+def ice_crack(rnd, dur=0.03):
+    """slizzy_ice: crisp glassy ice split (crackle.wav, HP 2.4 kHz, pitch 1.12-1.30)."""
+    return fade_out(biquad(crackle(rnd, dur, rnd.uniform(1.12, 1.3)), 'hp', 2400.0), 0.01)
+
+
 def magma_hiss(rnd, dur, pitch=(0.85, 1.05)):
     """slizzy_earth: dense magma hiss / rock crumble: overlapping crackle.wav grains (band 900 Hz - 7 kHz), decaying."""
     n = int(dur * SR)
@@ -443,6 +468,12 @@ def heat_crackle(mix, rnd, t, inten, n=1):
 
 
 def v2_slash(mix, t, inten, rnd):
+    if ICE:
+        mix.add(t - 0.09, frost_whoosh(rnd, rnd.uniform(1.0, 1.1), 0.34), 0.62 * inten, rnd.uniform(-0.3, 0.3))
+        mix.add(t, freeze_click(rnd), 0.42 * inten, rnd.uniform(-0.2, 0.2))
+        mix.add(t + 0.009, freeze_click(rnd), 0.26 * inten, rnd.uniform(-0.4, 0.4))
+        STATS['v2_slash'] = STATS.get('v2_slash', 0) + 1
+        return
     if EARTH:
         mix.add(t - 0.1, deep_whoosh(rnd, rnd.uniform(0.84, 0.94), 0.4), 0.62 * inten, rnd.uniform(-0.3, 0.3))
         heat_crackle(mix, rnd, t - 0.01, inten, 3)
@@ -464,6 +495,14 @@ def v2_slash(mix, t, inten, rnd):
 
 
 def v2_fan(mix, t, inten, blades, rnd):
+    if ICE:
+        for k, (p, off, pan) in enumerate(((0.96, -0.015, -0.55), (1.06, 0.0, 0.0), (1.16, 0.012, 0.55))):
+            mix.add(t - 0.09 + off, frost_whoosh(rnd, p * rnd.uniform(0.97, 1.03), 0.38), (0.4 if k != 1 else 0.48) * inten, pan)
+        for k in range(3):
+            mix.add(t + 0.011 * k, freeze_click(rnd), 0.32 * inten, rnd.uniform(-0.6, 0.6))
+        mix.add(t - 0.03, air(rnd, 0.38, 2400.0, 8000.0), 0.12 * inten * min(1.0, 0.5 + blades / 16.0), rnd.uniform(-0.2, 0.2))
+        STATS['v2_fan'] = STATS.get('v2_fan', 0) + 1
+        return
     if EARTH:
         for k, (p, off, pan) in enumerate(((0.74, -0.018, -0.55), (0.86, 0.0, 0.0), (0.98, 0.014, 0.55))):
             mix.add(t - 0.1 + off, deep_whoosh(rnd, p * rnd.uniform(0.97, 1.03), 0.44), (0.42 if k != 1 else 0.5) * inten, pan)
@@ -506,7 +545,9 @@ def avalanche(rnd, length, density, fine, glass=False):
             pitch = rnd.uniform(1.05, 1.3)
         if EARTH:  # falling rock + cooling magma: lower, fuller grains
             pitch = rnd.uniform(0.82, 1.05)
-        x = biquad(crackle(rnd, rnd.uniform(0.03, 0.09), pitch), 'hp', 1000.0 if EARTH else 2800.0 if glass else 1800.0 if fine else 1200.0)
+        if ICE:  # rolling ice chunks + crystalline ice crumb: bright, scattered
+            pitch = rnd.uniform(1.08, 1.3)
+        x = biquad(crackle(rnd, rnd.uniform(0.03, 0.09), pitch), 'hp', 2400.0 if ICE else 1000.0 if EARTH else 2800.0 if glass else 1800.0 if fine else 1200.0)
         put(tau, fade_out(x, 0.01), 0.3 * env * rnd.uniform(0.5, 1.0), rnd.uniform(-0.85, 0.85))
         STATS['v2_grains'] = STATS.get('v2_grains', 0) + 1
         tau += rnd.uniform(0.5, 1.5) / (density * (0.25 + 0.75 * env))
@@ -522,6 +563,8 @@ def avalanche(rnd, length, density, fine, glass=False):
 
 def chop_pitch(rnd, lo, hi=None):
     """chop.wav pitch: original range (slizzy_metal, identical rnd use) or the lower, heavier 0.78-0.92x (slizzy_obsidian)."""
+    if ICE:
+        return rnd.uniform(1.04, 1.16)
     if EARTH:
         return rnd.uniform(0.72, 0.86)
     if OBS:
@@ -531,7 +574,9 @@ def chop_pitch(rnd, lo, hi=None):
 
 def v2_impact(mix, t, tier, rnd):
     boost = 10 ** (2.5 / 20) if tier <= 1 else 1.0  # R1 punch: +2.5 dB (master re-normalises to -1.0 dBFS, soft limiter = no clipping)
-    if EARTH:  # massive tectonic sub
+    if ICE:  # dense, dry ice-block sub punch
+        mix.add(t, sweep_sine(85.0, 28.0, 0.6, rate=5.0, decay=5.5), (0.95 + 0.1 * min(tier, 4)) * boost)
+    elif EARTH:  # massive tectonic sub
         mix.add(t, sweep_sine(60.0, 22.0, 0.8, rate=4.5, decay=4.5), (1.0 + 0.1 * min(tier, 4)) * boost)
     elif OBS:  # deeper, heavier stone sub
         mix.add(t, sweep_sine(75.0, 24.0, 0.65, rate=5.0, decay=5.0), (0.95 + 0.1 * min(tier, 4)) * boost)
@@ -542,6 +587,9 @@ def v2_impact(mix, t, tier, rnd):
     if OBS:  # dry, sharp obsidian glass crack (crackle.wav, HP 2.8 kHz, pitch 1.05-1.30)
         mix.add(t, fade_out(biquad(crackle(rnd, 0.03, rnd.uniform(1.05, 1.3)), 'hp', 2800.0), 0.01), 0.7 * boost)
         mix.add(t + 0.012, fade_out(biquad(crackle(rnd, 0.022, rnd.uniform(1.05, 1.3)), 'hp', 2800.0), 0.008), 0.4 * boost, rnd.uniform(-0.5, 0.5))
+    if ICE:  # crisp glass-ice split on every impact (two layered crackle.wav cracks)
+        mix.add(t, ice_crack(rnd, 0.032), 0.68 * boost)
+        mix.add(t + 0.011, ice_crack(rnd, 0.022), 0.4 * boost, rnd.uniform(-0.5, 0.5))
     if EARTH:  # rock split crack + dense magma hiss / crumbling rock under every impact
         mix.add(t, fade_out(biquad(crackle(rnd, 0.04, rnd.uniform(0.8, 0.95)), 'hp', 1200.0), 0.012), 0.6 * boost)
         hiss = magma_hiss(rnd, 0.9 if tier <= 2 else 0.6)
@@ -562,7 +610,7 @@ def v2_impact(mix, t, tier, rnd):
         dt = 0.0
         for k in range(16):
             dt += rnd.uniform(0.01, 0.06) * (1 + k * 0.12)
-            mix.add(t + dt, fade_out(biquad(crackle(rnd, rnd.uniform(0.02, 0.045), rnd.uniform(1.05, 1.3) if OBS else rnd.uniform(0.95, 1.1)), 'hp', 2800.0 if OBS else 1800.0), 0.01),
+            mix.add(t + dt, fade_out(biquad(crackle(rnd, rnd.uniform(0.02, 0.045), rnd.uniform(1.12, 1.3) if ICE else rnd.uniform(1.05, 1.3) if OBS else rnd.uniform(0.95, 1.1)), 'hp', 2400.0 if ICE else 2800.0 if OBS else 1800.0), 0.01),
                     0.5 * math.exp(-dt / 0.4), rnd.uniform(-0.75, 0.75))
     else:  # mighty bass hit + wide rustling avalanche of crystals and metal powder
         n = int(0.35 * SR)
@@ -571,7 +619,7 @@ def v2_impact(mix, t, tier, rnd):
             boom[i] *= math.exp(-(i / SR) / 0.09)
         mix.add(t, boom, 2.2)
         if chop:
-            mix.add(t, biquad(fade_out(play(chop, chop_pitch(rnd, 0.7) if OBS else 0.7), 0.08), 'lp', 2000.0), 0.6)
+            mix.add(t, biquad(fade_out(play(chop, chop_pitch(rnd, 0.7) if (OBS or ICE) else 0.7), 0.08), 'lp', 2000.0), 0.6)
         length = 3.4 if tier >= 4 else 1.9
         aval = avalanche(rnd, length, 220.0 if tier >= 4 else 140.0, tier >= 4, glass=OBS)  # EARTH: rock grains (see avalanche)
         i0 = int((t + 0.01) * SR)
@@ -583,6 +631,17 @@ def v2_impact(mix, t, tier, rnd):
 
 
 def v2_clatter(mix, t, count, inten, rnd, rnd_idx=0):
+    if ICE:
+        if rnd_idx <= 2:  # R1-R3: ringing, crunchy ice chunks (bright crackle ticks + short dry chop.wav knock)
+            for _ in range(min(3, count)):
+                mix.add(t + rnd.uniform(0.0, 0.016), tick(rnd, 0.016, 0.03, 1800.0, (1.04, 1.22)), (0.12 + 0.24 * inten), rnd.uniform(-0.7, 0.7))
+            if inten > 0.35 and BANK.get('chop'):
+                mix.add(t, biquad(fade_out(play(BANK['chop'], rnd.uniform(1.04, 1.16), 0.0, 0.08), 0.03), 'lp', 2600.0), 0.18 * inten, rnd.uniform(-0.5, 0.5))
+        else:  # R4-R6: crisp scattered ice crumb
+            for _ in range(min(2, count)):
+                mix.add(t + rnd.uniform(0.0, 0.012), tick(rnd, 0.01, 0.022, 2600.0, (1.15, 1.35)), 0.07 + 0.14 * inten, rnd.uniform(-0.8, 0.8))
+        STATS['v2_clatter'] = STATS.get('v2_clatter', 0) + 1
+        return
     if EARTH:
         if rnd_idx <= 2:  # R1-R3: heavy rock clatter
             for _ in range(min(3, count)):
@@ -671,7 +730,7 @@ def main_v2(events, a):
         elif ty == 'clatter':
             if e.get('round', -1) in (0, 1, 2):
                 v2_clatter(mix, t, int(e.get('count', 1)), inten, rnd, e.get('round', 0))
-            elif (OBS or EARTH) and e.get('round', -1) in (3, 4, 5) and rnd.random() < 0.5:
+            elif (OBS or EARTH or ICE) and e.get('round', -1) in (3, 4, 5) and rnd.random() < 0.5:
                 v2_clatter(mix, t, int(e.get('count', 1)), inten, rnd, e.get('round', 3))
         elif ty == 'transition':
             v2_whoosh(mix, t, 0.25, 0.32, 1.25, rnd)
@@ -722,12 +781,13 @@ def main():
     ap.add_argument('--tail', type=float, default=1.0, help='extra seconds after last event')
     ap.add_argument('--duration', type=float, default=None, help='force total length in seconds')
     ap.add_argument('--seed', type=int, default=7)
-    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal', 'slizzy_obsidian', 'slizzy_earth'], default='obsidian', help='recipe.audioProfile')
+    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice'], default='obsidian', help='recipe.audioProfile')
     a = ap.parse_args()
-    global PROFILE, OBS, EARTH
+    global PROFILE, OBS, EARTH, ICE
     PROFILE = a.audio_profile
     OBS = PROFILE == 'slizzy_obsidian'
     EARTH = PROFILE == 'slizzy_earth'
+    ICE = PROFILE == 'slizzy_ice'
 
     with open(a.events, encoding='utf-8') as f:
         events = sorted(json.load(f), key=lambda e: e['time'])
@@ -736,7 +796,7 @@ def main():
         BANK[key] = load_sample(key + '.wav')
     print(f'audio profile: {PROFILE}')
     print('samples: ' + ', '.join(f'{k}={"live " + os.path.basename(v["path"]) if v else "synth fallback"}' for k, v in BANK.items()))
-    if PROFILE in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth'):
+    if PROFILE in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice'):
         mix, total, pauses = main_v2(events, a)
     else:
         total = a.duration if a.duration else (max((e['time'] for e in events), default=0.0) + a.tail + 0.6)
@@ -758,7 +818,7 @@ def main():
         w = windows.get(e['round'])
         return e.get('phase') == 'pour' or (w is not None and w[0] - 0.05 <= e['time'] <= w[1] + POUR_FADE)
 
-    for e in (events if PROFILE not in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth') else []):
+    for e in (events if PROFILE not in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice') else []):
         t, ty, inten, tool = e['time'], e['type'], float(e.get('intensity', 1.0)), e.get('tool', '')
         if ty == 'drop':
             voice_drop(mix, t, inten, rnd)

@@ -9,9 +9,10 @@ import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import { makeShardMaterial, SHARD_LOOKS } from '../slabs.js';
 import { makeGoldCast, makeEmeraldCap, makeRubyCap, makeVolcanicObsidian, makeMagmaCap } from '../textures.js';
 import { LAYOUT } from '../config.js';
-import { makeEarth } from '../textures.js';
+import { makeEarth, makeCryoIce } from '../textures.js';
 import { sphereTriangles, sphereCellKeep, clipSphereCell, pieceGeometry } from './sphere.js';
-import { makeLayeredPieceMaterial, makeEarthGrainMaterial, grainLook, grainLookState, crystalGeometry } from './earth.js';
+import { makeLayeredPieceMaterial, makeEarthGrainMaterial, grainLook, grainLookState, crystalGeometry,
+  makeCryoPieceMaterial, makeCryoGrainMaterial, cryoGrainLook } from './earth.js';
 import { mulberry32, clamp01 } from '../util.js';
 
 const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
@@ -82,10 +83,11 @@ export async function createDebris({ recipe, profile, scene, G }) {
   const [W, H, D] = recipe.object.size;
   const volcanic = recipe.object.surfaceStyle === 'obsidian'; // volcanic glass shell + molten magma fracture faces (default: gold + emerald)
   const sph = recipe.object.shape === 'sphere'; // Planet Earth: clipped ball pieces (R1-R3) + radius-coloured micro pieces (R4-R6)
+  const cryo = sph && recipe.object.coreStyle === 'cryo-plasma'; // Cryo Ice: glacial skin + cryo-plasma layers (Earth defaults otherwise)
   const rounds = recipe.v2.rounds;
   let big = null, chunks, grains, chunkCap, grainMat = null;
   if (sph) {
-    const gm = (grainMat = makeEarthGrainMaterial(W / 2, recipe.object.coreGlow ?? 1));
+    const gm = (grainMat = cryo ? makeCryoGrainMaterial(W / 2, recipe.object.coreGlow ?? 1) : makeEarthGrainMaterial(W / 2, recipe.object.coreGlow ?? 1));
     chunkCap = Math.max(64, ...rounds.filter((r) => (r.tier ?? 1) < 4).map((r) => sphereCellKeep(r.grid, W / 2, 'center').reduce((a, v) => a + v, 0)));
     chunks = instanced(chunkGeometry(9, 0.09), gm, chunkCap, true);
     grains = instanced(new THREE.BoxGeometry(1, 1, 1), gm, profile.maxShards ?? 8000, true);
@@ -102,8 +104,10 @@ export async function createDebris({ recipe, profile, scene, G }) {
   }
   // sphere mode: shared Earth maps (cached, same as the intact planet), piece material, lazily clipped piece sets per round
   const SR = W / 2;
-  const earth = sph ? makeEarth({ lon: 0, seed: 7, land: 0.34, ...(recipe.object.earth ?? {}) }) : null;
-  const pieceMat = sph ? makeLayeredPieceMaterial(earth, SR, recipe.object.coreGlow ?? 1) : null;
+  const iceCfg = { bump: 1.2, crackGlow: 0.6, ...(recipe.object.ice ?? {}) };
+  const earth = !sph ? null : cryo ? makeCryoIce(iceCfg) : makeEarth({ lon: 0, seed: 7, land: 0.34, ...(recipe.object.earth ?? {}) });
+  const pieceMat = !sph ? null : cryo ? makeCryoPieceMaterial(earth, SR, recipe.object.coreGlow ?? 1, iceCfg) : makeLayeredPieceMaterial(earth, SR, recipe.object.coreGlow ?? 1);
+  const lookFn = cryo ? cryoGrainLook : grainLook;
   const sphereTris = sph ? sphereTriangles(SR, recipe.object.detail ?? 20) : null;
   const pieceCache = new Map();
   const pieceGroup = new THREE.Group();
@@ -189,7 +193,7 @@ export async function createDebris({ recipe, profile, scene, G }) {
       for (let i = 0; i < n; i++) {
         const [x, y, z] = cells[i];
         aHome.setXYZ(i, x, y, z);
-        const L = grainLook(Math.hypot(x, y, z) / SR, earth.sample(x, y, z), hash(i * 2.71 + R.index * 5), gls);
+        const L = lookFn(Math.hypot(x, y, z) / SR, earth.sample(x, y, z), hash(i * 2.71 + R.index * 5), gls);
         mesh.setColorAt(i, L.color.multiplyScalar(0.9 + 0.2 * hash(i * 3.1 + 7)));
         aHeat.setX(i, L.heat);
       }
