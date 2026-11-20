@@ -116,7 +116,10 @@ export async function createGame(profile, recipe, opts = {}) {
     return clamp01((k + (k === 0 ? 0 : u)) / n);
   };
   const pourZ = (R, t) => D / 2 - pourProgress(R, t) * D;
-  const faceScaleAt = (R, t) => smooth(clamp01((1 - pourProgress(R, t)) / 0.3));
+  const CAP_GAP = 0.01;
+  /** World z of the glowing cap mesh (objects.js: cap.position.z = clipZ + 0.002; capGroup z = 0). */
+  const capZ = (R, t) => pourZ(R, t) + 0.002;
+  const faceScaleAt =(R, t) => smooth(clamp01((1 - pourProgress(R, t)) / 0.3));
 
   /**
    * Knife pose at time t: x, z, h (edge height above the table).
@@ -164,11 +167,13 @@ export async function createGame(profile, recipe, opts = {}) {
     }
     // pour: the blade face rides exactly on the melting cut face; strokes stay inside the (shrinking) face and
     // shorten into a high-frequency vibration as the cuts accelerate
-    const z = pourZ(R, t) + KNIFE_HALF;
-    const amp = Math.min(Math.max(HTOP * 0.6, 0.3), 0.72 * H * faceScaleAt(R, t));
-    let h = amp * clamp01(I / 0.4) * 0.5 * (1 - Math.cos(2 * Math.PI * u));
+    const z = capZ(R, t) + CAP_GAP + KNIFE_HALF; // blade back face sits on the cap plane (+0.01 anti z-fight)
+    const BOARD_TOP = 0; // table top y = 0: the stroke's lowest edge point is always on the board
+    const curH = H * Math.max(1e-3, faceScaleAt(R, t)); // current height of the remaining block
+    const amp = Math.min(curH * 0.45, 0.25);
+    let h = BOARD_TOP + amp * clamp01(I / 0.4) * 0.5 * (1 - Math.cos(2 * Math.PI * u));
     const vib = smooth(1 - I / 0.1);
-    h += vib * (0.5 + 0.5 * Math.sin(2 * Math.PI * 53 * t)) * 0.06;
+    h += vib * (0.5 + 0.5 * Math.sin(2 * Math.PI * 53 * t)) * Math.min(0.06, amp * 0.5);
     return { x: 0, z, h, vib };
   };
 
@@ -297,7 +302,11 @@ export async function createGame(profile, recipe, opts = {}) {
     return out;
   };
 
-  const pieces = (R, cuts) => Math.pow(Math.pow(R.cuts / 3 + 1, 3), clamp01(cuts / R.cuts));
+  const pieces = (R, cuts) => {
+    const e = Math.pow(Math.pow(R.cuts / 3 + 1, 3), clamp01(cuts / R.cuts));
+    if (cuts < 1) return e;
+    return Math.max(e, R.mode === 'pour' ? cuts * 2 : cuts + 1);
+  };
   /** Each round restarts from the whole block (4.2 cm) and shrinks geometrically to that round's final particle size. */
   const sizeM = (R, cuts) => SIZE0 * Math.pow(R.finalSize / SIZE0, clamp01(cuts / R.cuts));
 
@@ -382,7 +391,7 @@ export async function createGame(profile, recipe, opts = {}) {
     if (pouring) {
       const progAt = (te) => clamp01(bisect(R.list, te) / R.list.length);
       stream.update(t, {
-        kind: R.pile, emit: [R.list[0].t - 0.02, R.cutEnd], zAt: (te) => pourZ(R, te),
+        kind: R.pile, emit: [R.list[0].t - 0.02, R.cutEnd], zAt: (te) => capZ(R, te),
         hAt: (te) => poseAt(R, te).h, faceScale: (te) => faceScaleAt(R, te), size: [W, H], pile, progressAt: progAt,
         density: R.pile === 'sand' ? 1 : 0.55,
       });

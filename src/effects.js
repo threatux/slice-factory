@@ -290,7 +290,7 @@ export function createStream({ count, pal, pxScale, seed = 11 }) {
         // emission point: on the contact line between the knife edge and the cut face, just in front of the blade
         const x0 = (hash(sd) - 0.5) * W * 0.96 * fs;
         const y0 = Math.max(0.015, o.hAt(tEmit)) + hash(sd + 1) * 0.035;
-        const z0 = o.zAt(tEmit) + 0.035;
+        const z0 = o.zAt(tEmit) + 0.01;
         // landing point: around the apex of the cone at landing time
         const prog = o.progressAt(tEmit + L), apexY = o.pile.apex(Math.max(prog, 0.02));
         const ang = hash(sd + 2) * 6.283, rr = Math.sqrt(hash(sd + 3)) * o.pile.radius * Math.cbrt(Math.max(prog, 0.02)) * (sand ? 0.25 : 0.4);
