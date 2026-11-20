@@ -792,3 +792,120 @@ export function makeMagmaCap(pal, aspect = 1.58) {
   magmaCache.set(key, out);
   return out;
 }
+
+// ======================================================================================================
+// Planet Earth look (recipe.object.shape = "sphere"). Box recipes never call anything below.
+// ======================================================================================================
+function hash3(ix, iy, iz, seed) {
+  let h = (Math.imul(ix, 374761393) + Math.imul(iy, 668265263) + Math.imul(iz, 1103515245) + Math.imul(seed, 1442695041)) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
+/** 3D value noise (sampled on the unit sphere -> no dateline seam, no pole pinch). */
+function vnoise3(x, y, z, seed) {
+  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z), fx = x - ix, fy = y - iy, fz = z - iz;
+  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy), w = fz * fz * (3 - 2 * fz);
+  const l = (a, b, t) => a + (b - a) * t;
+  return l(
+    l(l(hash3(ix, iy, iz, seed), hash3(ix + 1, iy, iz, seed), u), l(hash3(ix, iy + 1, iz, seed), hash3(ix + 1, iy + 1, iz, seed), u), v),
+    l(l(hash3(ix, iy, iz + 1, seed), hash3(ix + 1, iy, iz + 1, seed), u), l(hash3(ix, iy + 1, iz + 1, seed), hash3(ix + 1, iy + 1, iz + 1, seed), u), v), w);
+}
+function fbm3(x, y, z, seed, oct) {
+  let s = 0, amp = 0.5, f = 1, n = 0;
+  for (let o = 0; o < oct; o++) { s += amp * vnoise3(x * f, y * f, z * f, seed + o * 31); n += amp; amp *= 0.5; f *= 2.03; }
+  return s / n;
+}
+
+const earthCache = new Map();
+/**
+ * Procedural Earth, equirectangular 2048x1024 (same uv convention as THREE.SphereGeometry; canvas row 0 = north pole).
+ * Oceans: deep #041e42 -> #0b4f8a -> turquoise shelf #1b8eb8; land: forests #2d6a3e, ochre deserts #c2a36b (subtropics, dry),
+ * ranges #7d6b5d (ridged noise), snowy peaks, tundra and white polar caps.
+ * Returns { map, roughnessMap (ocean 0.18-0.25, land 0.78-0.88), bumpMap, clouds (alpha, 1024x512), sample(dir) }.
+ * opts.lon rotates the globe (radians) so a chosen continent faces the camera.
+ */
+export function makeEarth(opts = {}) {
+  const lon = opts.lon ?? 0, seed = opts.seed ?? 7, landFrac = opts.land ?? 0.34;
+  const key = `earth|${lon}|${seed}|${landFrac}`;
+  if (earthCache.has(key)) return earthCache.get(key);
+  const W = 2048, H = 1024, N = W * H;
+  const dirs = (w, h, x, y) => {
+    const th = ((y + 0.5) / h) * Math.PI, ph = ((x + 0.5) / w) * 2 * Math.PI + lon, s = Math.sin(th);
+    return [-Math.cos(ph) * s, Math.cos(th), Math.sin(ph) * s];
+  };
+  const hgt = new Float32Array(N);
+  for (let y = 0, j = 0; y < H; y++) for (let x = 0; x < W; x++, j++) {
+    const [dx, dy, dz] = dirs(W, H, x, y);
+    const wx = fbm3(dx * 1.4 + 5.1, dy * 1.4, dz * 1.4, seed + 3, 3) - 0.5, wz = fbm3(dx * 1.4, dy * 1.4 + 2.3, dz * 1.4, seed + 5, 3) - 0.5;
+    hgt[j] = fbm3(dx * 1.25 + wx * 1.1, dy * 1.25 + (wx + wz) * 0.5, dz * 1.25 + wz * 1.1, seed + 11, 7);
+  }
+  // sea level = land-fraction quantile (sampled, deterministic)
+  const smp = []; for (let j = 0; j < N; j += 97) smp.push(hgt[j]);
+  smp.sort((a, b) => a - b);
+  const T = smp[Math.floor(smp.length * (1 - landFrac))], hMin = smp[0], hMax = smp[smp.length - 1];
+  const col = new Uint8ClampedArray(N * 3), rough = new Uint8ClampedArray(N), bump = new Uint8ClampedArray(N);
+  const C = (h) => srgbBytes(h);
+  const deep = C('#041e42'), mid = C('#0b4f8a'), shelf = C('#1b8eb8'), forest = C('#2d6a3e'), forest2 = C('#3f7d3a'), desert = C('#c2a36b'),
+    desert2 = C('#a8834f'), mount = C('#7d6b5d'), snow = C('#eef3f7'), tundra = C('#6f7a5c');
+  const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  for (let y = 0, j = 0; y < H; y++) for (let x = 0; x < W; x++, j++) {
+    const [dx, dy, dz] = dirs(W, H, x, y);
+    const lat = Math.abs(90 - ((y + 0.5) / H) * 180);
+    const h = hgt[j], det = fbm3(dx * 22, dy * 22, dz * 22, seed + 41, 3);
+    const capEdge = 71 + (fbm3(dx * 4, dy * 4, dz * 4, seed + 61, 3) - 0.5) * 14;
+    const ice = sstep(capEdge - 1.5, capEdge + 1.5, lat);
+    let c, r, b;
+    if (h < T) { // ocean: depth ramp + shallow shelf hugging the coasts
+      const dep = clamp((T - h) / (T - hMin), 0, 1);
+      c = dep < 0.07 ? mix(shelf, mid, sstep(0.0, 0.07, dep)) : mix(mid, deep, sstep(0.07, 0.5, dep));
+      const k = 0.94 + 0.12 * det; c = c.map((v) => v * k);
+      r = 0.18 + 0.07 * det; b = 0;
+    } else {
+      const e = clamp((h - T) / (hMax - T), 0, 1);
+      const ridge = 1 - Math.abs(2 * fbm3(dx * 5.5, dy * 5.5, dz * 5.5, seed + 21, 4) - 1);
+      const mnt = sstep(0.78, 0.94, ridge) * sstep(0.04, 0.3, e); // narrow ranges along ridges, inland only
+      const moist = fbm3(dx * 2.6 + 9, dy * 2.6, dz * 2.6, seed + 31, 4) + (lat > 38 ? 0.12 : 0) - (lat > 12 && lat < 36 ? 0.1 : 0);
+      const dry = sstep(0.46, 0.38, moist);
+      c = mix(mix(forest, forest2, det), mix(desert, desert2, det * 0.8), dry);
+      c = mix(c, tundra, sstep(52, 64, lat) * 0.8);
+      c = mix(c, mount, mnt * 0.9);
+      c = mix(c, snow, Math.min(0.7, sstep(0.75, 1.0, mnt * e * 1.3) * 0.55 + sstep(60, 68, lat) * mnt * 0.4)); // snowy peaks only
+      c = mix(mix(c, desert, 0.35), c, sstep(0, 0.02, e)); // thin sandy coast line
+      const k = 0.85 + 0.3 * det; c = c.map((v) => v * k);
+      r = 0.78 + 0.1 * det; b = clamp(e * 0.35 + mnt * 0.6 + det * 0.08, 0, 1);
+    }
+    if (ice > 0) { const k = 0.93 + 0.07 * det; c = mix(c, snow.map((v) => v * k), ice); r += (0.5 - r) * ice; b = Math.max(b, 0.25 * ice * det); }
+    col[j * 3] = c[0]; col[j * 3 + 1] = c[1]; col[j * 3 + 2] = c[2];
+    rough[j] = r * 255; bump[j] = b * 255;
+  }
+  const map = pixelData(W, H, (x, y) => { const j = (y * W + x) * 3; return [col[j], col[j + 1], col[j + 2]]; });
+  const roughnessMap = pixelData(W, H, (x, y) => { const v = rough[y * W + x]; return [v, v, v]; }, false);
+  const bumpMap = pixelData(W, H, (x, y) => { const v = bump[y * W + x]; return [v, v, v]; }, false);
+  // clouds: swirled bands (double domain warp, latitude-stretched), alpha only
+  const CW = 1024, CH = 512, cl = new Uint8ClampedArray(CW * CH);
+  for (let y = 0, j = 0; y < CH; y++) for (let x = 0; x < CW; x++, j++) {
+    const [dx, dy, dz] = dirs(CW, CH, x, y);
+    const q1 = fbm3(dx * 2.2, dy * 4.4, dz * 2.2, seed + 71, 3) - 0.5, q2 = fbm3(dx * 2.2 + 3.3, dy * 4.4, dz * 2.2, seed + 73, 3) - 0.5;
+    const a = Math.atan2(q2, q1) * 0.35;
+    const sx = dx * Math.cos(a) - dz * Math.sin(a), sz = dx * Math.sin(a) + dz * Math.cos(a);
+    const n = fbm3(sx * 3.2 + q1 * 2.4, dy * 6.0 + q2 * 2.0, sz * 3.2 + q2 * 2.4, seed + 81, 5);
+    const lat = Math.abs(90 - ((y + 0.5) / CH) * 180);
+    const band = 0.06 * Math.cos((lat / 90) * Math.PI * 3); // ITCZ / mid-latitude storm belts
+    cl[j] = clamp(Math.pow(sstep(0.53, 0.76, n + band), 1.4) * 0.95 * 255, 0, 255);
+  }
+  const clouds = pixelData(CW, CH, (x, y) => { const v = cl[y * CW + x]; return [v, v, v]; }, false);
+  /** Surface colour (sRGB bytes) + cloud cover in direction d (shard tinting). */
+  const sample = (dx, dy, dz) => {
+    const l = Math.hypot(dx, dy, dz) || 1;
+    let ph = Math.atan2(dz, -dx); ph =((ph % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const th = Math.acos(Math.max(-1, Math.min(1, dy / l)));
+    const x = Math.min(W - 1, Math.floor((ph / (2 * Math.PI)) * W)), y = Math.min(H - 1, Math.floor((th / Math.PI) * H));
+    const j = (y * W + x) * 3, cj = Math.min(CH - 1, y >> 1) * CW + Math.min(CW - 1, x >> 1);
+    return { rgb: [col[j], col[j + 1], col[j + 2]], cloud: cl[cj] / 255 };
+  };
+  for (const t of [map, roughnessMap, bumpMap, clouds]) t.wrapS = THREE.RepeatWrapping;
+  const out = { map, roughnessMap, bumpMap, clouds, sample };
+  earthCache.set(key, out);
+  return out;
+}

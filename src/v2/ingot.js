@@ -2,14 +2,15 @@
 // X/Y/Z seam lines computed in the fragment shader from object-space position (no decal geometry -> no Z-fighting).
 import * as THREE from 'three';
 import { blockGeometry, addIngotDecals } from '../objects.js';
-import { makeGoldCast, makeIngotDecals, makeVolcanicObsidian } from '../textures.js';
+import { makeGoldCast, makeIngotDecals, makeVolcanicObsidian, makeEarth } from '../textures.js';
+import { makeAtmosphere } from './earth.js';
 
 /**
  * Seams of axis a sit on the planes p_a = -S_a/2 + k S_a / n_a, k = 1..n_a-1. Seams k < lo are fully lit; lo <= k < hi are lit
  * only where the blade edge has already passed (x/z planes: blade falls along -y; y planes: blade travels along -z).
  * Line coverage is pixel-footprint antialiased (fwidth), width shrinks with grid density.
  */
-function addSeams(mat, U) {
+function addSeams(mat, U, alphaSeams = false) { // alphaSeams: translucent layer (clouds) turns opaque on the seam lines
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader
@@ -54,11 +55,69 @@ diffuseColor.rgb *= 1.0 - 0.8 * sH.x;`)
       .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.6, sH.x);')
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 totalEmissiveRadiance += (uSCol2 * sH.x * 0.35 + uSCol * sH.y) * uSGlow + uSCol * sNew * uSFl;`);
+    if (alphaSeams) sh.fragmentShader = sh.fragmentShader.replace('#include <alphamap_fragment>', '#include <alphamap_fragment>\ndiffuseColor.a = max(diffuseColor.a, sH.x);');
   };
-  mat.customProgramCacheKey = () => 'seams-v2';
+  mat.customProgramCacheKey = () => (alphaSeams ? 'seams-v2-alpha' : 'seams-v2');
+}
+
+/**
+ * Sphere mode (recipe.object.shape === "sphere"): procedural Earth (radius R = size/2) + swirling cloud shell (1.015 R) +
+ * Fresnel atmosphere. Same seam uniforms / API as the ingot: seams are the planes x|y|z = cut, drawn on the surface and on the
+ * clouds (so they stay crisp), faded by seamState().alpha for the loop. Clouds + atmosphere vanish with the planet at impact.
+ */
+function createPlanet(recipe) {
+  const cfg = recipe.object, pal = recipe.palette;
+  const R = cfg.size[0] / 2;
+  const seamCfg = { width: 0.024, glow: 2.4, flash: 5, ...(recipe.v2.seam ?? {}) };
+  const [c1, c2] = pal.seam ?? ['#fff3c4', '#ff5e00'];
+  const ec = { lon: 0, seed: 7, land: 0.34, bump: 1.6, clouds: 0.85, atmosphere: '#4cc9f0', atmoStrength: 1, ...(cfg.earth ?? {}) };
+  const earth = makeEarth(ec);
+  const frame = new THREE.Group();
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, map: earth.map, roughnessMap: earth.roughnessMap, bumpMap: earth.bumpMap, bumpScale: ec.bump, roughness: 1, metalness: 0,
+    clearcoat: 0.0, envMapIntensity: 1.0,
+  });
+  const U = {
+    uSN: { value: new THREE.Vector3(1, 1, 1) }, uSLo: { value: new THREE.Vector3(1, 1, 1) }, uSHi: { value: new THREE.Vector3(1, 1, 1) },
+    uSRev: { value: new THREE.Vector3() }, uSFlash: { value: new THREE.Vector3() }, uSW: { value: new THREE.Vector3(0.02, 0.02, 0.02) },
+    uHalf: { value: new THREE.Vector3(R, R, R) },
+    uSCol: { value: new THREE.Color(c1) }, uSCol2: { value: new THREE.Color(c2) },
+    uSGlow: { value: seamCfg.glow }, uSFl: { value: seamCfg.flash }, uSAlpha: { value: 1 },
+  };
+  addSeams(mat, U);
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(R, 192, 96), mat);
+  mesh.castShadow = mesh.receiveShadow = true;
+  const cloudMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, alphaMap: earth.clouds, transparent: true, opacity: ec.clouds, roughness: 0.9, metalness: 0, depthWrite: false,
+  });
+  addSeams(cloudMat, U, true);
+  const clouds = new THREE.Mesh(new THREE.SphereGeometry(R * 1.015, 160, 80), cloudMat);
+  clouds.renderOrder = 1;
+  const atmo = makeAtmosphere(R, ec.atmosphere, ec.atmoStrength);
+  frame.add(mesh, clouds, atmo.halo, atmo.limb);
+  const extras = [clouds, atmo.halo, atmo.limb];
+  return {
+    frame, mesh, size: [2 * R, 2 * R, 2 * R], earth,
+    setPose(y, yaw) { frame.position.set(0, y, 0); frame.rotation.set(0, yaw, 0); frame.updateMatrixWorld(true); },
+    setVisible(v) { mesh.visible = v; for (const e of extras) e.visible = v; },
+    setSeams(s) {
+      const [nx, ny, nz] = s.grid;
+      U.uSN.value.set(nx, ny, nz);
+      U.uSLo.value.set(s.axes[0].lo, s.axes[1].lo, s.axes[2].lo);
+      U.uSHi.value.set(s.axes[0].hi, s.axes[1].hi, s.axes[2].hi);
+      U.uSRev.value.set(s.axes[0].rev, s.axes[1].rev, s.axes[2].rev);
+      U.uSFlash.value.set(s.axes[0].flash, s.axes[1].flash, s.axes[2].flash);
+      const w = (n) => seamCfg.width / Math.sqrt(Math.max(1, n - 1)) + 0.0035;
+      U.uSW.value.set(w(nx), w(ny), w(nz));
+      const dens = Math.max(nx, ny, nz);
+      U.uSGlow.value = seamCfg.glow * s.pulse * (dens > 10 ? 0.8 : 1);
+      U.uSAlpha.value = s.alpha;
+    },
+  };
 }
 
 export function createIngot(recipe) {
+  if (recipe.object.shape === 'sphere') return createPlanet(recipe);
   const cfg = recipe.object, pal = recipe.palette;
   const [W, H, D] = cfg.size;
   const bevel = cfg.bevel ?? 0.045;

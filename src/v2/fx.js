@@ -28,7 +28,16 @@ export function createFx({ recipe, profile, scene, tl }) {
   let seed = 1;
   const rnd = () => hash(seed++ * 0.6180339);
   /** Point on the blade edge line inside the ingot (local), biased to the faces where sparks are visible. */
+  // sphere mode: the free coordinate of a blade-edge point is projected onto the ball surface (sparks/crumbs leave the planet's skin)
+  const sph = recipe.object.shape === 'sphere', SRr = half[0];
+  const shell = (p, k) => { let o = 0; for (let i = 0; i < 3; i++) if (i !== k) o += p[i] * p[i]; p[k] = (p[k] / half[k]) * Math.sqrt(Math.max(0, SRr * SRr - o)); return p; };
+  const bottomY = (x, z) => (sph ? -Math.sqrt(Math.max(0, SRr * SRr - x * x - z * z)) : -half[1]);
   const edgePoint = (P, c, r) => {
+    const E = edgePointBox(P, c, r);
+    if (sph) shell(E.p, P.axis === 1 || P.axis === 2 ? 0 : 2);
+    return E;
+  };
+  const edgePointBox = (P, c, r) => {
     const s = rnd() < 0.7 ? 1 : rnd() * 2 - 1; // 70% on the camera-facing surface
     if (P.axis === 0) return { p: [c, half[1] - r * 2 * half[1], s * half[2]], n: [0, 0, Math.sign(s) || 1], dir: [0, -1, 0] };
     if (P.axis === 2) { const x = (rnd() < 0.6 ? 1 : rnd() * 2 - 1) * half[0]; return { p: [x, half[1] - r * 2 * half[1], c], n: [Math.sign(x) * 0.8, 0, 0.6], dir: [0, -1, 0] }; }
@@ -54,7 +63,7 @@ export function createFx({ recipe, profile, scene, tl }) {
     for (let k = 0; k < crumbN; k++) {
       const tb = P.t0 + P.dur * (0.3 + 0.7 * rnd());
       const E = edgePoint(P, P.planes[Math.floor(rnd() * planes.length)] ?? 0, 0.5 + 0.5 * rnd());
-      crumbs.push({ tb, p: toWorld([E.p[0], -half[1] + 0.02, E.p[2]], tb), v: rotV([(rnd() - 0.5) * 1.2, -0.3 * rnd(), (rnd() - 0.2) * 1.1], tb), life: 2.2 + rnd(), size: 0.02 + 0.025 * rnd(), tint: rnd(), hook: inHook });
+      crumbs.push({ tb, p: toWorld([E.p[0], bottomY(E.p[0], E.p[2]) + 0.02, E.p[2]], tb), v: rotV([(rnd() - 0.5) * 1.2, -0.3 * rnd(), (rnd() - 0.2) * 1.1], tb), life: 2.2 + rnd(), size: 0.02 + 0.025 * rnd(), tint: rnd(), hook: inHook });
     }
   };
   // hook fans: dense sparks + first gold crumbs
@@ -70,6 +79,7 @@ export function createFx({ recipe, profile, scene, tl }) {
       for (let k = 0; k < n; k++) {
         const tb = a + (b - a) * rnd();
         const lp = [(rnd() * 2 - 1) * half[0] * 0.95, -half[1] + 0.01, (rnd() * 2 - 1) * half[2] * 0.95];
+        if (sph) { const q = Math.hypot(lp[0], lp[2]) / (SRr * 0.95); if (q > 1) { lp[0] /= q; lp[2] /= q; } lp[1] = bottomY(lp[0], lp[2]) + 0.01; }
         if (k % 3 === 0) sparks.push({ tb, p: toWorld(lp, tb), v: [(rnd() - 0.5) * 0.6, -0.4 - rnd(), (rnd() - 0.5) * 0.6], life: 0.5 + 0.4 * rnd(), size: 0.01 + 0.01 * rnd(), hot: 0.3 + 0.7 * rnd(), gold: true });
         else crumbs.push({ tb, p: toWorld(lp, tb), v: [(rnd() - 0.5) * 0.5, -0.2 * rnd(), (rnd() - 0.5) * 0.5], life: Math.max(0.6, R.dropStart + 0.25 - tb), size: 0.012 + 0.016 * rnd(), tint: rnd() });
       }
@@ -100,6 +110,7 @@ export function createFx({ recipe, profile, scene, tl }) {
   for (let i = 0; i < ND; i++) {
     const h = (k) => hash(i * 7.31 + k * 1.913 + 0.5);
     const p0 = [(h(1) * 2 - 1) * half[0], h(2) * H, (h(3) * 2 - 1) * half[2]];
+    if (sph) { const q = Math.hypot(p0[0], p0[1] - SRr, p0[2]) / SRr; if (q > 1) { p0[0] /= q; p0[1] = SRr + (p0[1] - SRr) / q; p0[2] /= q; } }
     const phi = Math.atan2(p0[2] + (h(4) - 0.5) * 0.6, p0[0] + (h(5) - 0.5) * 0.6) + (h(6) - 0.5) * 0.9;
     let rf = 0.6 + 2.7 * Math.pow(h(7), 0.8); // -25% reach vs the flat-carpet version
     const cx = Math.cos(phi), cz = Math.sin(phi);
@@ -114,6 +125,7 @@ export function createFx({ recipe, profile, scene, tl }) {
       swirl: (h(11) - 0.5) * 0.9, size: 0.013 + 0.026 * Math.pow(h(12), 2), col: dcols[ci][0], glint: h(13), hp: Math.pow(h(18), 0.8),
       tgt: [(h(14) * 2 - 1) * half[0] * 0.9, tl.Y0 + (h(15) * 2 - 1) * half[1] * 0.9, (h(16) * 2 - 1) * half[2] * 0.9], d: 0.3 * h(17),
     });
+    if (sph) { const g = D6[D6.length - 1], q = Math.hypot(g.tgt[0], g.tgt[1] - tl.Y0, g.tgt[2]) / (SRr * 0.9); if (q > 1) { g.tgt[0] /= q; g.tgt[1] = tl.Y0 + (g.tgt[1] - tl.Y0) / q; g.tgt[2] /= q; } }
   }
   /** Avalanche position of grain g at tau after the R6 impact (pure). */
   const dustAt = (g, tau, out) => {

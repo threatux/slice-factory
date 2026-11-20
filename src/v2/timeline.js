@@ -1,6 +1,7 @@
 // v2.0 (Levitate -> X/Y/Z slash -> drop -> shatter) pure schedule. Everything here is a function of the recipe + profile only:
 // no state, no wall clock. game.js evaluates it at the simulation time t of each fixed step.
 import { clamp01 } from '../util.js';
+import { sphereCellKeep } from './sphere.js';
 
 export const AXIS = { x: 0, y: 1, z: 2, d: 3 }; // d = diagonal flourish pass (no seams of its own)
 const easeIO = (u) => 0.5 - 0.5 * Math.cos(Math.PI * clamp01(u)); // samurai stroke: slow-in, very fast middle, slow-out
@@ -29,7 +30,16 @@ export function buildTimelineV2(recipe, profile) {
   const ev = (time, type, extra = {}) => events.push({ time, type, ...extra });
 
   /** Grid scaled down (cube root) to the profile's instance budget; HUD labels stay as authored. */
-  const fitGrid = (g) => {
+  const sphere = recipe.object.shape === 'sphere';
+  /** Sphere mode: pieces actually kept inside the ball (R1-R3 by volume, micro rounds by cell centre). */
+  const sphereCount = (g, physics) => sphereCellKeep(g, W / 2, physics === 'rapier' ? 'volume' : 'center').reduce((s, v) => s + v, 0);
+  const fitGrid = (g, physics) => {
+    if (sphere) { // largest uniform shrink whose in-ball piece count fits the instance budget
+      if (sphereCount(g, physics) <= budget) return [...g];
+      let k = 1;
+      while (k > 0.2 && sphereCount(g.map((v) => Math.max(2, Math.floor(v * k))), physics) > budget) k -= 0.01;
+      return g.map((v) => Math.max(2, Math.floor(v * k)));
+    }
     const n = g[0] * g[1] * g[2];
     if (n <= budget) return [...g];
     const f = Math.cbrt(budget / n);
@@ -76,7 +86,7 @@ export function buildTimelineV2(recipe, profile) {
 
   // ---- rounds ----
   const rounds = V.rounds.map((rc, i) => {
-    const grid = fitGrid(rc.grid);
+    const grid = fitGrid(rc.grid, rc.physics ?? 'analytic');
     const Y = rc.levitateY ?? Y0;
     const fall = fallFrom(Y);
     const impact = rc.impact ?? rc.dropAt + fall;
@@ -84,12 +94,12 @@ export function buildTimelineV2(recipe, profile) {
       index: i, label: rc.label, pieces: rc.pieces, bonus: !!rc.bonus, start: rc.start, grid, authoredGrid: rc.grid,
       physics: rc.physics ?? 'analytic', tier: rc.tier ?? 1, Y, fall, impact, dropStart: impact - fall,
       shake: rc.shake ?? 0.08, pop: rc.pop ?? 2.5, spread: rc.spread ?? 8, pile: rc.pile ?? null, ruby: !!rc.ruby, silence: !!rc.silence, pulse: rc.pulse ?? 0,
-      rise: rc.rise ?? null, rain: rc.rain ?? null, dust: !!rc.dust, drizzle: rc.drizzle ?? 0,
+      rise: rc.rise ?? null, rain: rc.rain ?? null, split: rc.split ?? null, damping: rc.damping ?? null, dust: !!rc.dust, drizzle: rc.drizzle ?? 0,
       reasmEnd: i === 0 ? rc.start : rc.start + reasm,
     };
     R.passes = planPasses(rc.passes, grid, i);
     R.cutEnd = Math.max(...R.passes.map((p) => p.t1));
-    R.count = grid[0] * grid[1] * grid[2];
+    R.count = sphere ? sphereCount(grid, R.physics) : grid[0] * grid[1] * grid[2];
     if (i > 0) ev(R.start, 'transition', { round: i, intensity: 0.7 });
     for (const P of R.passes) {
       const type = P.fan ? 'fan_slash' : 'slash';

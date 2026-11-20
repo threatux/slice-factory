@@ -13,6 +13,10 @@ import { createCameraRig } from './camera.js';
 import { createHudV2 } from './hud.js';
 
 export async function createGameV2(profile, recipe) {
+  if (recipe.object.shape === 'sphere') { // ball of radius r: every module sees its bounding cube (H/2 = r -> centre lands on y = r)
+    const r = recipe.object.radius;
+    recipe = { ...recipe, object: { ...recipe.object, size: [2 * r, 2 * r, 2 * r] } };
+  }
   const pal = recipe.palette;
   const tl = buildTimelineV2(recipe, profile);
   const { rounds, duration } = tl;

@@ -9,6 +9,9 @@ import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
 import { makeShardMaterial, SHARD_LOOKS } from '../slabs.js';
 import { makeGoldCast, makeEmeraldCap, makeRubyCap, makeVolcanicObsidian, makeMagmaCap } from '../textures.js';
 import { LAYOUT } from '../config.js';
+import { makeEarth } from '../textures.js';
+import { sphereTriangles, sphereCellKeep, clipSphereCell, pieceGeometry } from './sphere.js';
+import { makeLayeredPieceMaterial, makeEarthGrainMaterial, grainLook, grainLookState, crystalGeometry } from './earth.js';
 import { mulberry32, clamp01 } from '../util.js';
 
 const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
@@ -78,22 +81,65 @@ export async function createDebris({ recipe, profile, scene, G }) {
   const pal = recipe.palette;
   const [W, H, D] = recipe.object.size;
   const volcanic = recipe.object.surfaceStyle === 'obsidian'; // volcanic glass shell + molten magma fracture faces (default: gold + emerald)
-  const mat = volcanic
-    ? makeShardMaterial(makeVolcanicObsidian(pal), makeMagmaCap(pal, W / H), SHARD_LOOKS['obsidian-magma'])
-    : makeShardMaterial(makeGoldCast(pal), makeEmeraldCap(pal, W / H), { ...SHARD_LOOKS['gold-emerald'], ruby: makeRubyCap(pal, W / H) });
+  const sph = recipe.object.shape === 'sphere'; // Planet Earth: clipped ball pieces (R1-R3) + radius-coloured micro pieces (R4-R6)
   const rounds = recipe.v2.rounds;
-  const chunkCap = Math.max(64, ...rounds.filter((r) => (r.tier ?? 1) < 4).map((r) => r.grid[0] * r.grid[1] * r.grid[2]));
-  const big = instanced(chunkGeometry(4, 0.045), mat, 64, true);
-  const chunks = instanced(chunkGeometry(9, 0.09), mat, chunkCap, true);
-  const grains = instanced(new THREE.BoxGeometry(1, 1, 1), mat, profile.maxShards ?? 8000, true);
-  scene.add(big, chunks, grains);
+  let big = null, chunks, grains, chunkCap, grainMat = null;
+  if (sph) {
+    const gm = (grainMat = makeEarthGrainMaterial(W / 2, recipe.object.coreGlow ?? 1));
+    chunkCap = Math.max(64, ...rounds.filter((r) => (r.tier ?? 1) < 4).map((r) => sphereCellKeep(r.grid, W / 2, 'center').reduce((a, v) => a + v, 0)));
+    chunks = instanced(chunkGeometry(9, 0.09), gm, chunkCap, true);
+    grains = instanced(new THREE.BoxGeometry(1, 1, 1), gm, profile.maxShards ?? 8000, true);
+    scene.add(chunks, grains);
+  } else {
+    const mat = volcanic
+      ? makeShardMaterial(makeVolcanicObsidian(pal), makeMagmaCap(pal, W / H), SHARD_LOOKS['obsidian-magma'])
+      : makeShardMaterial(makeGoldCast(pal), makeEmeraldCap(pal, W / H), { ...SHARD_LOOKS['gold-emerald'], ruby: makeRubyCap(pal, W / H) });
+    chunkCap = Math.max(64, ...rounds.filter((r) => (r.tier ?? 1) < 4).map((r) => r.grid[0] * r.grid[1] * r.grid[2]));
+    big = instanced(chunkGeometry(4, 0.045), mat, 64, true);
+    chunks = instanced(chunkGeometry(9, 0.09), mat, chunkCap, true);
+    grains = instanced(new THREE.BoxGeometry(1, 1, 1), mat, profile.maxShards ?? 8000, true);
+    scene.add(big, chunks, grains);
+  }
+  // sphere mode: shared Earth maps (cached, same as the intact planet), piece material, lazily clipped piece sets per round
+  const SR = W / 2;
+  const earth = sph ? makeEarth({ lon: 0, seed: 7, land: 0.34, ...(recipe.object.earth ?? {}) }) : null;
+  const pieceMat = sph ? makeLayeredPieceMaterial(earth, SR, recipe.object.coreGlow ?? 1) : null;
+  const sphereTris = sph ? sphereTriangles(SR, recipe.object.detail ?? 20) : null;
+  const pieceCache = new Map();
+  const pieceGroup = new THREE.Group();
+  if (sph) scene.add(pieceGroup);
+  /** Clipped pieces of a round grid (cached): [{ mesh, hull (Float32Array, cell-local, shrunk by GAP), home }]. */
+  const spherePieces = (grid) => {
+    const key = grid.join('x');
+    if (pieceCache.has(key)) return pieceCache.get(key);
+    const [nx, ny, nz] = grid, keep = sphereCellKeep(grid, SR, 'volume');
+    const cw = W / nx, ch = H / ny, cd = D / nz, out = [];
+    let i = 0;
+    for (let a = 0; a < nx; a++) for (let b = 0; b < ny; b++) for (let c = 0; c < nz; c++, i++) {
+      if (!keep[i]) continue;
+      const lo = [-W / 2 + a * cw, -H / 2 + b * ch, -D / 2 + c * cd], hi = [lo[0] + cw, lo[1] + ch, lo[2] + cd];
+      const home = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+      const clip = clipSphereCell(sphereTris, SR, lo, hi);
+      const pg = pieceGeometry(clip, home);
+      const mesh = new THREE.Mesh(pg.geometry, pieceMat);
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.visible = false;
+      pieceGroup.add(mesh);
+      const hull = new Float32Array(pg.hull.length * 3);
+      pg.hull.forEach((q, k) => hull.set([q[0] * GAP, q[1] * GAP, q[2] * GAP], k * 3));
+      out.push({ mesh, hull, home, centroid: clip.centroid });
+    }
+    pieceCache.set(key, out);
+    return out;
+  };
+  const gls = sph ? grainLookState() : null;
 
   // anomaly gem (palette.ruby, name kept for recipe compatibility): ruby by default; shape "diamond" + gradient = faceted ice diamond
   const rp = { size: 0.2, color: '#8a001c', emissive: '#4a000f', emissiveIntensity: 0.27, shape: 'ruby', roughness: 0.08, clearcoat: 1.0, ior: 1.76,
     metalness: 0.1, envMapIntensity: 0.85, light: null, lightIntensity: 0.7, lightGather: 1.2, gradient: null, ...(pal.ruby ?? {}) };
-  const diamond = rp.shape === 'diamond';
-  const ruby = new THREE.Mesh(diamond ? diamondGeometry(rp.size, rp.gradient) : rubyGeometry(rp.size), new THREE.MeshPhysicalMaterial({
-    color: diamond ? 0xffffff : rp.color, vertexColors: diamond, roughness: rp.roughness, metalness: rp.metalness, clearcoat: rp.clearcoat, clearcoatRoughness: 0.02, ior: rp.ior, specularIntensity: 1,
+  const diamond = rp.shape === 'diamond', crystal = rp.shape === 'crystal'; // crystal: faceted alien anomaly (sphere recipes)
+  const ruby = new THREE.Mesh(crystal ? crystalGeometry(rp.size, rp.gradient) : diamond ? diamondGeometry(rp.size, rp.gradient) : rubyGeometry(rp.size), new THREE.MeshPhysicalMaterial({
+    color: diamond || crystal ? 0xffffff : rp.color, vertexColors: diamond || crystal, roughness: rp.roughness, metalness: rp.metalness, clearcoat: rp.clearcoat, clearcoatRoughness: 0.02, ior: rp.ior, specularIntensity: 1,
     specularColor: new THREE.Color('#ffffff'), emissive: rp.emissive, emissiveIntensity: rp.emissiveIntensity, envMapIntensity: rp.envMapIntensity, flatShading: true,
   }));
   ruby.castShadow = true; ruby.visible = false;
@@ -109,7 +155,59 @@ export async function createDebris({ recipe, profile, scene, G }) {
   const clatter = []; // { t, v } ground impacts (audio)
 
   /** Pieces of round R: home cells (ingot-local centres), sizes, skin flags. */
+  /** Sphere mode set: R1-R3 = clipped ball pieces (own meshes), R4-R6 = micro pieces of the cells whose centre is inside the ball. */
+  function buildSphereSet(R, pose, t) {
+    const [nx, ny, nz] = R.grid;
+    const cw = W / nx, ch = H / ny, cd = D / nz;
+    let cells, mesh = null, pieces = null;
+    if (R.physics === 'rapier') {
+      pieces = spherePieces(R.grid);
+      cells = pieces.map((p) => p.home);
+    } else {
+      const keep = sphereCellKeep(R.grid, SR, 'center');
+      cells = [];
+      let i = 0;
+      for (let a = 0; a < nx; a++) for (let b = 0; b < ny; b++) for (let c = 0; c < nz; c++, i++) {
+        if (keep[i]) cells.push([-W / 2 + (a + 0.5) * cw, -H / 2 + (b + 0.5) * ch, -D / 2 + (c + 0.5) * cd]);
+      }
+      mesh = R.tier < 4 && cells.length <= chunkCap ? chunks : grains;
+    }
+    const n = cells.length;
+    const S = {
+      R, mesh, n, t0: t, mode: R.physics, home: new Float32Array(n * 3), half: new Float32Array(n * 3),
+      pos: new Float32Array(n * 3), quat: new Float32Array(n * 4), vel: new Float32Array(n * 3), ang: new Float32Array(n * 3),
+      rest: new Uint8Array(n), bodies: null, gather: null, framePos: [0, pose.y, 0], yaw: pose.yaw, ruby: null,
+      pieces, hulls: pieces ? pieces.map((p) => p.hull) : null,
+    };
+    for (let i = 0; i < n; i++) {
+      S.home.set(cells[i], i * 3);
+      S.half.set([(cw * GAP) / 2, (ch * GAP) / 2, (cd * GAP) / 2], i * 3);
+    }
+    if (mesh) {
+      const aHeat = mesh.geometry.attributes.aHeat, aHome = mesh.geometry.attributes.aOutP; // aOutP = home cell centre in sphere mode
+      grainMat.userData.uniforms.uCell.value = cw;
+      for (let i = 0; i < n; i++) {
+        const [x, y, z] = cells[i];
+        aHome.setXYZ(i, x, y, z);
+        const L = grainLook(Math.hypot(x, y, z) / SR, earth.sample(x, y, z), hash(i * 2.71 + R.index * 5), gls);
+        mesh.setColorAt(i, L.color.multiplyScalar(0.9 + 0.2 * hash(i * 3.1 + 7)));
+        aHeat.setX(i, L.heat);
+      }
+      aHeat.needsUpdate = aHome.needsUpdate = true;
+      mesh.instanceColor.needsUpdate = true;
+      mesh.count = n;
+    } else for (const p of pieces) p.mesh.visible = true;
+    qa.setFromAxisAngle(up, pose.yaw);
+    for (let j = 0; j < n; j++) {
+      va.fromArray(S.home, j * 3).applyQuaternion(qa).add(vs.set(0, pose.y, 0));
+      va.toArray(S.pos, j * 3);
+      qa.toArray(S.quat, j * 4);
+    }
+    return S;
+  }
+
   function buildSet(R, pose, t) {
+    if (sph) return buildSphereSet(R, pose, t);
     const [nx, ny, nz] = R.grid, n = nx * ny * nz;
     const mesh = n <= 8 ? big : R.tier < 4 && n <= chunkCap ? chunks : grains;
     const cw = W / nx, ch = H / ny, cd = D / nz;
@@ -159,7 +257,11 @@ export async function createDebris({ recipe, profile, scene, G }) {
     for (let i = 0; i < S.n; i++) {
       const [hx, hy, hz] = S.home.subarray(i * 3, i * 3 + 3);
       let v, w;
-      if (S.n === 2) { // R1: the two halves topple outward, cut faces (emerald) rolling up toward the camera
+      if (S.n === 2 && S.pieces) { // sphere R1: hemispheres hop apart and roll ~100 deg onto their domes -> cut faces up, tilted to the camera
+        const s = Math.sign(hx), k = R.split ?? {};
+        v = [s * R.pop * (k.out ?? 0.45), R.pop * (k.up ?? 1.25), k.fwd ?? 0.3];
+        w = [k.tilt ?? 1.6, 0, -s * R.pop * (k.spin ?? 4.4)];
+      } else if (S.n === 2) { // R1: the two halves topple outward, cut faces (emerald) rolling up toward the camera
         const s = Math.sign(hx);
         v = [s * R.pop * 1.1, R.pop * 1.6, 0.25];
         w = [0, 0, -s * R.pop * 5.2];
@@ -175,8 +277,9 @@ export async function createDebris({ recipe, profile, scene, G }) {
       const vw = va.set(...v).applyAxisAngle(up, pose.yaw);
       const body = world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(tr[0], tr[1], tr[2])
         .setRotation({ x: qa.x, y: qa.y, z: qa.z, w: qa.w }).setLinvel(vw.x, vw.y, vw.z).setAngvel({ x: w[0], y: w[1], z: w[2] })
-        .setLinearDamping(0.05).setAngularDamping(0.35));
-      world.createCollider(RAPIER.ColliderDesc.cuboid(S.half[i * 3], S.half[i * 3 + 1], S.half[i * 3 + 2]).setFriction(0.7).setRestitution(0.15).setDensity(1), body);
+        .setLinearDamping(S.pieces ? (R.damping?.[0] ?? 0.3) : 0.05).setAngularDamping(S.pieces ? (R.damping?.[1] ?? 1.4) : 0.35)); // round pieces: extra damping (no rolling off the table)
+      const cdesc = (S.hulls && RAPIER.ColliderDesc.convexHull(S.hulls[i])) || RAPIER.ColliderDesc.cuboid(S.half[i * 3], S.half[i * 3 + 1], S.half[i * 3 + 2]);
+      world.createCollider(cdesc.setFriction(S.pieces && S.n === 2 ? (R.split?.friction ?? 0.7) : 0.7).setRestitution(0.15).setDensity(1), body);
       S.bodies.push(body);
       S.vel[i * 3 + 1] = vw.y;
     }
@@ -192,7 +295,7 @@ export async function createDebris({ recipe, profile, scene, G }) {
       const ang = Math.atan2(hz + (r1 - 0.5) * 0.5, hx + (r2 - 0.5) * 0.5) + (r3 - 0.5) * 0.7;
       const radial = Math.min(1, Math.hypot(hx / (W / 2), hz / (D / 2)) / 1.41);
       const yN = (hy + H / 2) / H;
-      const s = R.spread * (0.12 + 0.88 * Math.pow(r4, R.pile ? 1.5 : 0.85)) * (0.55 + 0.45 * radial);
+      const s = R.spread * (0.12 + 0.88 * Math.pow(r4, R.pile ? 1.5 : 0.85)) * (0.55 + 0.45 * radial) * (sph ? 0.4 + 0.8 * Math.min(1, Math.hypot(hx, hy, hz) / SR) : 1); // sphere: crust flies wider, the core stays central
       const vw = va.set(Math.cos(ang) * s, (1.2 + 5.5 * r2) * (0.4 + yN), Math.sin(ang) * s * 0.85 + 0.35 * s * 0.2).applyAxisAngle(up, pose.yaw);
       S.vel.set([vw.x, vw.y, vw.z], i * 3);
       const wm = 8 + 18 * r1;
@@ -278,7 +381,7 @@ export async function createDebris({ recipe, profile, scene, G }) {
     const u = clamp01(tau / T), s = L * (1 - (1 - u) * (1 - u));
     const dir = [0.38, 0.925];
     const hop = 0.32 * Math.sin(Math.PI * clamp01(tau / 0.28)) * (tau < 0.28 ? 1 : 0);
-    const p = [dir[0] * s, rp.size * 0.95 + hop, dir[1] * s];
+    const p = [dir[0] * s, (rp.restY ?? rp.size * 0.95) + hop, dir[1] * s];
     const roll = s / rp.size;
     qa.setFromAxisAngle(ax.set(dir[1], 0, -dir[0]), roll);
     qb.setFromAxisAngle(ax.set(1, 0, 0), Math.PI / 2 - 0.35); // rests tilted on a pavilion facet
@@ -286,6 +389,10 @@ export async function createDebris({ recipe, profile, scene, G }) {
   }
 
   function writeMatrices(S) {
+    if (S.pieces) { // sphere R1-R3: one mesh per clipped piece
+      S.pieces.forEach((p, i) => { p.mesh.position.fromArray(S.pos, i * 3); p.mesh.quaternion.fromArray(S.quat, i * 4); });
+      return;
+    }
     for (let i = 0; i < S.n; i++) {
       m4.compose(va.fromArray(S.pos, i * 3), qa.fromArray(S.quat, i * 4), vs.set(S.half[i * 3] * 2, S.half[i * 3 + 1] * 2, S.half[i * 3 + 2] * 2));
       S.mesh.setMatrixAt(i, m4);
@@ -295,7 +402,7 @@ export async function createDebris({ recipe, profile, scene, G }) {
 
   function clearSet() {
     if (!set) return;
-    set.mesh.count = 0;
+    if (set.pieces) set.pieces.forEach((p) => { p.mesh.visible = false; }); else set.mesh.count = 0;
     if (world) { world.free(); world = null; }
     ruby.visible = false; rubyLight.intensity = 0;
     set = null;
