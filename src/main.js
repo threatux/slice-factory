@@ -1,12 +1,14 @@
 import profiles from '../config/render-profiles.json';
 import { createGame } from './game.js';
 import { createGameV2 } from './v2/game.js';
+import { createGameV3 } from './v3/game.js';
 
 let game = null;
 
 window.__RENDER_API__ = {
   async init(profile, recipe, opts = {}) {
-    game = recipe.engine === 'v2' ? await createGameV2(profile, recipe, opts) : await createGame(profile, recipe, opts);
+    game = recipe.engineVersion === 3 ? await createGameV3(profile, recipe, opts)
+      : recipe.engine === 'v2' ? await createGameV2(profile, recipe, opts) : await createGame(profile, recipe, opts);
     return game.info();
   },
   step(dt) { game.step(dt); },

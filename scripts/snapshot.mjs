@@ -22,7 +22,10 @@ let server, browser;
 try {
   server = await createServer({ root, logLevel: 'error', server: { host: '127.0.0.1' } });
   await server.listen();
-  browser = await chromium.launch({ channel: 'msedge', headless: true, args: ['--use-gl=angle', '--use-angle=d3d11', '--enable-webgl', '--ignore-gpu-blocklist', '--enable-gpu-rasterization'] });
+  // macOS: bundled Chromium + ANGLE/Metal; elsewhere: Edge + ANGLE/D3D11 (same launch policy as render.mjs)
+  browser = await chromium.launch(process.platform === 'darwin'
+    ? { headless: true, args: ['--use-gl=angle', '--use-angle=metal', '--enable-webgl', '--ignore-gpu-blocklist', '--enable-gpu-rasterization'] }
+    : { channel: 'msedge', headless: true, args: ['--use-gl=angle', '--use-angle=d3d11', '--enable-webgl', '--ignore-gpu-blocklist', '--enable-gpu-rasterization'] });
   const page = await browser.newPage({ viewport: { width: profile.width, height: profile.height }, deviceScaleFactor: 1 });
   page.on('pageerror', (e) => console.error('[page error]', e.message));
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.error('[page]', m.text()); });

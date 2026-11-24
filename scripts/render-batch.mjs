@@ -7,6 +7,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Homebrew dirs may be missing from PATH on macOS (also inherited by the render.mjs child).
+if (process.platform === 'darwin') {
+  const cur = (process.env.PATH ?? '').split(path.delimiter);
+  const extra = ['/opt/homebrew/bin', '/usr/local/bin'].filter((d) => fs.existsSync(d) && !cur.includes(d));
+  process.env.PATH = [...cur, ...extra].join(path.delimiter);
+}
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const FFPROBE = process.env.FFPROBE_PATH || 'ffprobe';
 const MIN_BYTES = 1024 * 1024;

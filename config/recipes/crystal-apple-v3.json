@@ -1,0 +1,110 @@
+{
+  "id": "crystal-apple-v3",
+  "engineVersion": 3,
+  "title": "CRYSTAL GLASS APPLE",
+  "audioProfile": "slizzy_glass",
+  "seed": 2203,
+  "object": {
+    "type": "procedural",
+    "shape": "apple",
+    "surfaceStyle": "crystal-apple",
+    "coreStyle": "crystal-apple-core",
+    "radius": 0.6,
+    "apple": { "squash": 0.92, "shoulder": 0.08, "taper": 0.1, "dimpleTop": [0.35, 0.38], "dimpleBottom": [0.2, 0.35], "lobes": [0.028, 0.03], "rings": 96, "segments": 160 },
+    "glass": { "color": "#d0102e", "transmission": 0.72, "ior": 1.52, "thickness": 1.4, "roughness": 0.05, "clearcoat": 1.0, "envMapIntensity": 1.8, "attenuationColor": "#8a001f", "attenuationDistance": 0.9 },
+    "coreGlow": 1.0,
+    "innerGlow": 1.6,
+    "leafShards": 0.025,
+    "shards": { "envMapIntensity": 2.6, "fresnel": 0.55 },
+    "stem": { "stemColor": "#8c5a2b", "leafYaw": 2.45 }
+  },
+  "palette": {
+    "core": "#ffb703",
+    "accent": "#ff1744",
+    "seam": ["#fff3b0", "#ffb703"],
+    "crumb": "#ff1744",
+    "crumbHi": "#fff3b0",
+    "sparkColors": ["#fff8e1", "#ffffff", "#ffb703"],
+    "sparkGold": "#ffb703",
+    "shardSkin": ["#b80028", "#ff1744"],
+    "shardFlesh": ["#ff8fab", "#ffd1dc"],
+    "shardGold": ["#ffb703", "#fff3b0"],
+    "dustGlint": [1.6, 1.4, 1.2],
+    "dust": [["#8a001f", 0.3], ["#d0102e", 0.26], ["#ff5c8a", 0.12], ["#ffb703", 0.2], ["#fff3b0", 0.06], ["#00c853", 0.03], ["#ffd1dc", 0.03]],
+    "gem": { "size": 0.11, "restY": 0.075, "gradient": ["#003d1f", "#00c853", "#7dffb8"], "emissive": "#00c853", "emissiveIntensity": 0.45, "light": "#00ff88", "lightIntensity": 0.3, "roll": 1.4, "dir": [0.42, 0.9] }
+  },
+  "v3": {
+    "duration": 20.2,
+    "gravity": 60,
+    "reassemble": 0.3,
+    "dustScale": 0.35,
+    "softEdge": true,
+    "studio": {
+      "exposure": 1.0, "environmentIntensity": 1.0, "key": 2.6, "rim": 26, "tableTopRim": 0.5, "side": 14, "ambient": 0.12, "shadowMapSize": 2048, "msaa": 4,
+      "bloom": { "strength": 0.22, "radius": 0.45, "threshold": 0.94, "clamp": 1.4 },
+      "table": "#0d0f14", "roughness": [0.16, 0.32], "clearcoat": 0.85, "tableEnv": 0.9, "tableSpecular": 0.12, "fog": "#08090d", "fogNear": 7, "fogFar": 17,
+      "blobScale": 1.55, "blobOpacity": 0.8, "mirror": { "strength": 0.15, "fade": [1.3, 3.4], "scale": 0.5 }
+    },
+    "kinetics": { "shakePx": 3, "shakeMs": 120, "punch": 0.015, "punchMs": 140 },
+    "razor": { "height": 0.2, "thickness": 0.006, "stagger": 0.012, "streak": 0.9, "edge": "#e8f6ff" },
+    "hud": { "badgeFrom": "#ffe08a", "badgeTo": "#ffb703", "badgeText": "#1a0006", "bonusFrom": "#ff1744", "bonusMid": "#fff3b0", "bonusTo": "#ffb703", "hot": "#ffd166", "textShadowStrong": true, "whipFlash": 0, "bonusFontScale": 0.87 },
+    "knife": { "overshoot": 0.25, "trail": 3, "streak": 0.85, "edge": "#dff3ff", "lightIntensity": 0.9, "color": "#f7fafd", "metalness": 0.84, "roughness": 0.17, "envMapIntensity": 2.6, "emissive": "#8ea6c4", "emissiveIntensity": 0.2 },
+    "seam": { "width": 0.008, "glow": 1.4, "flash": 6 },
+    "hook": {
+      "end": 0.72, "whipEnd": 0.98, "grid": [2, 1, 1], "keepSeam": true,
+      "title": "1 Cut vs 100 Cuts", "badge": "Wait for 100 Cuts 👀",
+      "passes": [{ "axis": "x", "t": 0.05, "dur": 0.38 }],
+      "crumbs": 24
+    },
+    "rounds": [
+      { "label": "1 Cut", "pieces": "2 Pieces", "start": 1.0, "grid": [2, 1, 1], "physics": "rapier", "tier": 1, "impact": 1.3, "lift": 0.45, "rise": [1.0, 1.15], "carryHook": true,
+        "pop": 2.2, "split": { "out": 0.1, "up": 0.5, "fwd": 0.1, "spin": 1.3, "tilt": 0.22, "friction": 0.12 }, "damping": [2.4, 4.5],
+        "passes": [] },
+      { "label": "3 Cuts", "pieces": "8 Pieces", "start": 3.2, "grid": [2, 2, 2], "physics": "rapier", "tier": 2, "impact": 4.45, "lift": 0.6, "rise": [3.2, 3.55],
+        "pop": 2.6, "damping": [0.8, 4.0], "ruby": true,
+        "passes": [{ "axis": "x", "t": 3.55, "dur": 0.2 }, { "axis": "y", "t": 3.8, "dur": 0.2 }, { "axis": "z", "t": 4.05, "dur": 0.2 }] },
+      { "label": "9 Cuts", "pieces": "60 Pieces", "start": 6.3, "grid": [4, 4, 4], "physics": "rapier", "tier": 2, "impact": 8.22, "lift": 0.7, "rise": [6.3, 6.7],
+        "pop": 3.8, "damping": [0.5, 3.0], "ruby": true, "drizzle": 30,
+        "passes": [
+          { "axis": "x", "t": 6.7, "dur": 0.13 }, { "axis": "y", "t": 6.85, "dur": 0.13 }, { "axis": "z", "t": 7.0, "dur": 0.13 },
+          { "axis": "x", "t": 7.15, "dur": 0.13 }, { "axis": "y", "t": 7.3, "dur": 0.13 }, { "axis": "z", "t": 7.45, "dur": 0.13 },
+          { "axis": "x", "t": 7.6, "dur": 0.13 }, { "axis": "y", "t": 7.75, "dur": 0.13 }, { "axis": "z", "t": 7.9, "dur": 0.13 }
+        ] },
+      { "label": "36 Cuts", "pieces": "1,800+ Pieces", "start": 10.0, "grid": [15, 15, 15], "physics": "analytic", "tier": 3, "impact": 11.68, "lift": 0.75, "rise": [10.0, 10.45],
+        "spread": 4.6, "silence": true, "drizzle": 50,
+        "bladeStyle": "single-blitz",
+        "passes": [
+          { "axis": "x", "t": 10.45, "dur": 0.095, "dir": 1, "tilt": 7 }, { "axis": "x", "t": 10.557, "dur": 0.09, "dir": -1, "tilt": -9 }, { "axis": "x", "t": 10.658, "dur": 0.085, "dir": 1, "tilt": 10 },
+          { "axis": "x", "t": 10.755, "dur": 0.08, "dir": -1, "tilt": -6 }, { "axis": "y", "t": 10.861, "dur": 0.076, "dir": 1, "tilt": 16 }, { "axis": "y", "t": 10.949, "dur": 0.072, "dir": -1, "tilt": -14 },
+          { "axis": "y", "t": 11.033, "dur": 0.068, "dir": 1, "tilt": 18 }, { "axis": "y", "t": 11.113, "dur": 0.064, "dir": -1, "tilt": -12 }, { "axis": "z", "t": 11.203, "dur": 0.061, "dir": 1, "tilt": -8 },
+          { "axis": "z", "t": 11.276, "dur": 0.057, "dir": -1, "tilt": 9 }, { "axis": "z", "t": 11.346, "dur": 0.054, "dir": 1, "tilt": -10 }
+        ] },
+      { "label": "BONUS: 100 Cuts", "pieces": "15,000+ Glass Shards", "bonus": true, "start": 13.6, "grid": [34, 34, 34], "physics": "analytic", "tier": 4, "impact": 16.05,
+        "lift": 0.9, "rise": [13.6, 14.2], "spread": 4.8, "pile": { "h": 0.62, "sigma": 1.05 }, "silence": true, "pulse": 1, "ruby": true,
+        "rain": [14.3, 15.8, 300], "dust": true,
+        "bladeStyle": "single-blitz",
+        "passes": [
+          { "axis": "x", "t": 14.2, "dur": 0.102, "dir": 1, "tilt": 8 }, { "axis": "x", "t": 14.31, "dur": 0.098, "dir": -1, "tilt": -10 }, { "axis": "x", "t": 14.416, "dur": 0.093, "dir": 1, "tilt": 6 },
+          { "axis": "x", "t": 14.517, "dur": 0.089, "dir": -1, "tilt": -9 }, { "axis": "x", "t": 14.615, "dur": 0.085, "dir": 1, "tilt": 11 }, { "axis": "x", "t": 14.708, "dur": 0.081, "dir": -1, "tilt": -7 },
+          { "axis": "y", "t": 14.809, "dur": 0.078, "dir": 1, "tilt": 18 }, { "axis": "y", "t": 14.895, "dur": 0.074, "dir": -1, "tilt": -16 }, { "axis": "y", "t": 14.977, "dur": 0.071, "dir": 1, "tilt": 14 },
+          { "axis": "y", "t": 15.056, "dur": 0.068, "dir": -1, "tilt": -18 }, { "axis": "y", "t": 15.132, "dur": 0.065, "dir": 1, "tilt": 12 }, { "axis": "y", "t": 15.205, "dur": 0.062, "dir": -1, "tilt": -15 },
+          { "axis": "z", "t": 15.287, "dur": 0.059, "dir": 1, "tilt": -9 }, { "axis": "z", "t": 15.354, "dur": 0.057, "dir": -1, "tilt": 10 }, { "axis": "z", "t": 15.419, "dur": 0.054, "dir": 1, "tilt": -8 },
+          { "axis": "z", "t": 15.481, "dur": 0.052, "dir": -1, "tilt": 11 }, { "axis": "d", "t": 15.552, "dur": 0.089, "dir": 1, "tilt": 6, "diag": 1 }, { "axis": "d", "t": 15.661, "dur": 0.089, "dir": -1, "tilt": -6, "diag": -1 }
+        ] }
+    ],
+    "finale": { "text": "Spot the hidden 💎?\nWhat next? 👇", "in": 16.6, "out": 19.0, "rewind": 19.3, "converge": 20.02, "shimmer": [16.7, 19.25] },
+    "hold": { "t0": 16.5, "t1": 19.3, "yaw": 9, "light": 1.6 },
+    "camera": {
+      "macro": { "pos": [0.95, 1.0, 3.45], "look": [0.0, 0.62, 0.0], "fov": 38 },
+      "work": { "pos": [1.0, 2.05, 4.1], "look": [0.0, 0.58, 0.25], "fov": 48 },
+      "push": { "pos": [0.85, 2.3, 3.9], "look": [0.0, 0.92, 0.2], "fov": 46 },
+      "bonus": { "pos": [0.8, 2.6, 4.2], "look": [0.0, 1.02, 0.1], "fov": 48 },
+      "wide": { "pos": [0.9, 3.1, 4.6], "look": [0.0, 0.1, 0.9], "fov": 50 },
+      "breath": 3,
+      "keys": [
+        [0.0, "macro"], [0.45, "macro"], [0.95, "work"], [9.9, "work"], [10.45, "push"], [13.4, "push"], [14.2, "bonus"],
+        [16.1, "bonus"], [16.6, "wide"], [19.3, "wide"], [20.02, "macro"], [20.2, "macro"]
+      ]
+    }
+  }
+}

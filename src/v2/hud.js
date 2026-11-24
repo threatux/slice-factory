@@ -61,7 +61,11 @@ export function createHudV2(profile, recipe, tl) {
       label.textContent = txt;
       label.className = 'ln' + (bonus ? ' bonus' : '');
       label.style.fontSize = '';
-      if (!fitCache.has(txt)) { fit(label); fitCache.set(txt, label.style.fontSize); } else label.style.fontSize = fitCache.get(txt);
+      if (!fitCache.has(txt)) {
+        fit(label);
+        if (bonus && hc.bonusFontScale) label.style.fontSize = (parseFloat(getComputedStyle(label).fontSize) * hc.bonusFontScale).toFixed(2) + 'px'; // pop headroom inside 9:16
+        fitCache.set(txt, label.style.fontSize);
+      } else label.style.fontSize = fitCache.get(txt);
     }
   };
   const fin = V.finale, R0 = tl.rounds[0], hk = V.hook;
@@ -101,7 +105,7 @@ export function createHudV2(profile, recipe, tl) {
       op(final, fa);
       final.style.transform = `translateY(${((1 - sm(fin.in, fin.in + 0.3, t)) * profile.height * 0.02).toFixed(2)}px)`;
       // flash: whip transition, impacts, round transitions
-      let f = 0.38 * Math.max(0, 1 - Math.abs(t - (hk.end + 0.13)) / 0.17);
+      let f = (hc.whipFlash ?? 0.38) * Math.max(0, 1 - Math.abs(t - (hk.end + 0.13)) / 0.17);
       for (const R of tl.rounds) {
         const tau = t - R.impact;
         if (tau >= 0 && tau < 0.2) f = Math.max(f, (0.05 + 0.04 * R.tier) * (1 - tau / 0.2));

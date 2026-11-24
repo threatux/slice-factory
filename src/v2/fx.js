@@ -78,7 +78,7 @@ export function createFx({ recipe, profile, scene, tl }) {
   inHook = false;
   tl.rounds.forEach((R) => {
     const drizzle = Math.round(R.drizzle / Math.max(1, R.passes.length));
-    R.passes.forEach((P) => emitPass(P, P.fan ? 9 : 40, drizzle));
+    R.passes.forEach((P) => emitPass(P, P.blitz ? 6 : P.fan ? 9 : 40, drizzle));
     if (R.rain) { // golden rain of micro sparks/crumbs streaming off the hyper-cut ingot
       const [a, b, n] = R.rain;
       for (let k = 0; k < n; k++) {

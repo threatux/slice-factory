@@ -26,6 +26,11 @@ Uses the live samples public/audio/{chop,crackle,whoosh}.wav (soft synthesis onl
     (crackle.wav HP 3.0 kHz, 1.15-1.45x, irregular burst); slashes = ionised energy whoosh (whoosh.wav 500-1800 Hz body) +
     15-20 ms electric click; ringing-heavy shell-casing / uranium-crystal clatter R1-R3 and scree R4-R6. NUC branches only:
     the 5 earlier profiles are untouched.
+  * "slizzy_glass" (v3 Crystal Glass Apple, thin-walled crystal): knife = silky glassy whistle (whoosh.wav band 2.0-6.5 kHz) +
+    dry 18 ms glass nick (crackle.wav band 4-8 kHz); impact_shatter = dense springy sub punch (noise through an 88 -> 32 Hz
+    sweeping SVF low-pass, no oscillator) + crunchy glass break (chop.wav 1.35-1.60x) + bright shower of fine glass
+    (multi-layer crackle.wav micro transients band 2.8-9.5 kHz); R4-R5 = sparkling cascade of glass shards on stone, dead silence
+    in the tension pauses, clean reverse at the end. GLASS branches only: the 6 earlier profiles are untouched.
   * --audio-profile (recipe.audioProfile): "obsidian" (default, unchanged) | "metal_crystal" (gold bar / emerald core):
     R1-R2 heavy chop.wav (pitch 0.96-1.08, 120-260 Hz body accent) + dry emerald chip from crackle.wav (15-28 ms, HP 2.4 kHz, -8 dB);
     dense runs crossfade into HP 2.4 kHz crystal crumb (no synthetic sines anywhere); pour R4 pitch 0.98-1.10, R5 pitch 1.22-1.40 + 5-9 kHz accent;
@@ -51,6 +56,7 @@ EARTH = False  # True for 'slizzy_earth' (tectonic planet split + magma)
 ICE = False  # True for 'slizzy_ice' (cryo ice sphere: dry ice block + glassy ice crunch)
 PLASTIC = False  # True for 'slizzy_plastic' (Rubik's cube: hard ABS clicks + LEGO rattle)
 NUC = False  # True for 'slizzy_nuclear' (uranium fuel rod: titanium knock + Geiger crackle)
+GLASS = False  # True for 'slizzy_glass' (v3 crystal glass apple: crystal whistle + glass shatter)
 
 
 class Mix:
@@ -595,7 +601,166 @@ def zap(rnd):
     return geiger(rnd, rnd.uniform(0.015, 0.02), (1.2, 1.4))
 
 
+# ---- slizzy_glass (v3 Crystal Glass Apple) -----------------------------------------------------------
+def bandpass(x, lo, hi):
+    """Two cascaded RBJ biquads: HP lo + LP hi (band-limited, no resonance peak)."""
+    return biquad(biquad(x, 'hp', lo), 'lp', hi)
+
+
+def crystal_whistle(rnd, pitch, dur):
+    """Silky, sharp glassy knife whistle: whoosh.wav restricted to 2.0-6.5 kHz (+ a faint 6.5 kHz air sheen)."""
+    x = play(BANK['whoosh'], pitch) if BANK.get('whoosh') else biquad(noise(int(0.6 * SR), rnd), 'hp', 2000.0)
+    body = bandpass(x, 2000.0, 6500.0)
+    top = biquad(x, 'hp', 6500.0)
+    n = min(len(x), int(dur * SR))
+    out = [1.8 * body[i] + 0.2 * top[i] for i in range(n)]
+    return fade_out(out, min(0.06, dur * 0.3))
+
+
+def glass_nick(rnd, dur=0.018, pitch=(1.15, 1.4)):
+    """Dry glass incision: one 18 ms crackle.wav impulse band-limited to 4-8 kHz."""
+    return fade_out(bandpass(crackle(rnd, dur, rnd.uniform(*pitch)), 4000.0, 8000.0), min(0.006, dur * 0.4))
+
+
+def glass_grain(rnd, lo=0.006, hi=0.016, pitch=(1.2, 1.6)):
+    """Micro transient of fine glass: crackle.wav band 2.8-9.5 kHz."""
+    return fade_out(bandpass(crackle(rnd, rnd.uniform(lo, hi), rnd.uniform(*pitch)), 2800.0, 9500.0), 0.004)
+
+
+def glass_break(rnd, pitch=(1.35, 1.6), dur=None):
+    """Crunchy glass fracture body: chop.wav pitched 1.35-1.60x (HP 700 Hz keeps it crisp, no boom)."""
+    if not BANK.get('chop'):
+        return glass_grain(rnd, 0.03, 0.05)
+    return biquad(fade_out(play(BANK['chop'], rnd.uniform(*pitch), 0.0, dur), 0.06 if dur is None else dur * 0.4), 'hp', 700.0)
+
+
+def glass_shower(mix, rnd, t, length, rate, gain, spread=0.85):
+    """Bright shower of fine glass: irregular (exponential-gap) layered micro transients, rate decaying over `length`."""
+    tau = 0.0
+    while tau < length:
+        env = math.exp(-tau / (length * 0.4))
+        mix.add(t + tau, glass_grain(rnd), gain * env * rnd.uniform(0.45, 1.0), rnd.uniform(-spread, spread))
+        STATS['v2_grains'] = STATS.get('v2_grains', 0) + 1
+        tau += rnd.expovariate(rate * (0.3 + 0.7 * env))
+
+
+def glass_slash(mix, t, inten, rnd):
+    mix.add(t - 0.09, crystal_whistle(rnd, rnd.uniform(1.0, 1.12), 0.32), 0.6 * inten, rnd.uniform(-0.3, 0.3))
+    mix.add(t, glass_nick(rnd), 0.5 * inten, rnd.uniform(-0.2, 0.2))
+    mix.add(t + 0.009, glass_nick(rnd, 0.012), 0.26 * inten, rnd.uniform(-0.4, 0.4))
+    STATS['v2_slash'] = STATS.get('v2_slash', 0) + 1
+
+
+def glass_blitz(mix, t, inten, idx, n, dur, rnd):
+    """R4/R5 single-blitz: ONE knife per event -> an accelerating machine-gun of crisp separate cuts.
+    Per stroke: a short (<= 0.8 x stroke) glassy whistle that rises in pitch with the tempo, a sharp glass nick on contact and two
+    micro glass grains. Nothing outlasts its own stroke interval, so strokes never smear into a hum."""
+    k = idx / max(1.0, n - 1.0)  # 0 -> 1 across the burst (tempo ramps up)
+    wd = max(0.04, min(0.1, dur * 0.95))
+    pitch = (1.0 + 0.5 * k) * rnd.uniform(0.97, 1.03)
+    if BANK.get('whoosh'):
+        x = bandpass(play(BANK['whoosh'], pitch, rnd.uniform(0.0, 0.12), wd), 2400.0 + 600.0 * k, 7500.0)
+    else:
+        x = bandpass(noise(int(wd * SR), rnd), 2400.0, 7500.0)
+    m = len(x)
+    a, r = max(1, int(m * 0.25)), max(1, int(m * 0.5))
+    for i in range(m):  # sharp attack, quick release: reads as a single "swish"
+        x[i] *= (0.5 - 0.5 * math.cos(math.pi * i / a)) if i < a else 1.0
+        if i >= m - r:
+            x[i] *= 0.5 + 0.5 * math.cos(math.pi * (i - (m - r)) / r)
+    pan = rnd.uniform(-0.45, 0.45)
+    mix.add(t - 0.55 * wd, x, (0.5 + 0.12 * k) * inten * 1.6, pan)
+    mix.add(t, glass_nick(rnd, 0.014, (1.2 + 0.25 * k, 1.45 + 0.25 * k)), (0.55 + 0.1 * k) * inten, pan * 0.6)
+    mix.add(t + 0.006, glass_grain(rnd, 0.005, 0.01, (1.3, 1.7)), 0.3 * inten, rnd.uniform(-0.6, 0.6))
+    mix.add(t + 0.015, glass_grain(rnd, 0.004, 0.008, (1.4, 1.8)), 0.2 * inten, rnd.uniform(-0.6, 0.6))
+    STATS['v2_blitz'] = STATS.get('v2_blitz', 0) + 1
+
+
+def glass_fan(mix, t, inten, blades, rnd):
+    if blades <= 1:  # the v3 hook is a single chef-knife stroke (timeline tags hook passes as fan_slash)
+        return glass_slash(mix, t, inten, rnd)
+    for k, (p, off, pan) in enumerate(((0.98, -0.014, -0.55), (1.1, 0.0, 0.0), (1.22, 0.011, 0.55))):
+        mix.add(t - 0.09 + off, crystal_whistle(rnd, p * rnd.uniform(0.97, 1.03), 0.36), (0.38 if k != 1 else 0.46) * inten, pan)
+    for k in range(3):
+        mix.add(t + 0.01 * k, glass_nick(rnd), 0.32 * inten, rnd.uniform(-0.6, 0.6))
+    mix.add(t - 0.03, air(rnd, 0.36, 4000.0, 9500.0), 0.1 * inten * min(1.0, 0.5 + blades / 16.0), rnd.uniform(-0.2, 0.2))
+    STATS['v2_fan'] = STATS.get('v2_fan', 0) + 1
+
+
+def glass_cascade(rnd, length, density):
+    """R4-R5: sparkling cascade of thousands of glass shards on stone (stereo): band-passed 2.8-9.5 kHz grains + a few
+    heavier chunk clinks (chop.wav 1.4-1.6x, short) + a silky high glass-dust bed. Returns (L, R)."""
+    n = int(length * SR) + int(0.2 * SR)
+    L, R = [0.0] * n, [0.0] * n
+
+    def put(off, x, g, pan):
+        i0 = int(off * SR)
+        a = (max(-1.0, min(1.0, pan)) + 1.0) * math.pi / 4.0
+        gl, gr = math.cos(a) * g, math.sin(a) * g
+        for k in range(min(len(x), n - i0)):
+            L[i0 + k] += x[k] * gl
+            R[i0 + k] += x[k] * gr
+    tau = 0.0
+    while tau < length:
+        env = math.exp(-tau / (length * 0.36))
+        if rnd.random() < 0.06 and BANK.get('chop'):
+            put(tau, glass_break(rnd, (1.4, 1.6), 0.05), 0.16 * env, rnd.uniform(-0.8, 0.8))
+        else:
+            put(tau, glass_grain(rnd, 0.008, 0.03, (1.15, 1.55)), 0.3 * env * rnd.uniform(0.5, 1.0), rnd.uniform(-0.9, 0.9))
+        STATS['v2_grains'] = STATS.get('v2_grains', 0) + 1
+        tau += rnd.uniform(0.5, 1.5) / (density * (0.25 + 0.75 * env))
+    for ch in (L, R):
+        bed = bandpass(noise(int(length * SR), rnd), 4500.0, 9500.0)
+        for i in range(len(bed)):
+            u = i / SR
+            ch[i] += bed[i] * min(1.0, u / 0.015) * math.exp(-u / (length * 0.3)) * 0.07
+    return L, R
+
+
+def glass_impact(mix, t, tier, rnd, boost):
+    """slizzy_glass impact_shatter: springy noise sub 88 -> 32 Hz + crunchy glass break + bright fine-glass shower."""
+    mix.add(t, nuclear_sub(rnd, 0.45, 88.0, 32.0, 0.09), (0.9 + 0.07 * min(tier, 4)) * boost)
+    mix.add(t, glass_break(rnd), 0.8 * boost, -0.15)
+    mix.add(t + 0.003, glass_nick(rnd, 0.02, (1.1, 1.3)), 0.55 * boost, 0.2)
+    aval = None
+    if tier <= 1:  # two thick crystal halves: second break + a short shower
+        mix.add(t + 0.06, glass_break(rnd, (1.4, 1.6), 0.12), 0.55 * boost, 0.25)
+        glass_shower(mix, rnd, t + 0.008, 0.45, 70.0, 0.36 * boost)
+    elif tier == 2:  # cascade of breaks + dense shower
+        for k in range(5):
+            mix.add(t + rnd.uniform(0.03, 0.3), glass_break(rnd, (1.4, 1.6), 0.08), 0.3 * math.exp(-k / 4.0), rnd.uniform(-0.6, 0.6))
+        glass_shower(mix, rnd, t + 0.006, 0.7, 120.0, 0.36)
+    else:  # dense noise thump + sparkling glass avalanche
+        nb = int(0.3 * SR)
+        boom = biquad(noise(nb, rnd), 'lp', 170.0)
+        for i in range(nb):
+            boom[i] *= math.exp(-(i / SR) / 0.08)
+        mix.add(t, boom, 1.8)
+        length = 3.2 if tier >= 4 else 1.9
+        aval = glass_cascade(rnd, length, 260.0 if tier >= 4 else 170.0)
+        i0 = int((t + 0.008) * SR)
+        for k in range(min(len(aval[0]), mix.n - i0)):
+            mix.L[i0 + k] += aval[0][k]
+            mix.R[i0 + k] += aval[1][k]
+    STATS['v2_impact'] = STATS.get('v2_impact', 0) + 1
+    return aval
+
+
+def glass_clatter(mix, t, count, inten, rnd, rnd_idx=0):
+    if rnd_idx <= 2:  # R1-R3: ringing crystal chunks on stone (bright clinks + a short high chop.wav knock)
+        for _ in range(min(3, count)):
+            mix.add(t + rnd.uniform(0.0, 0.014), glass_grain(rnd, 0.012, 0.026, (1.2, 1.45)), 0.14 + 0.26 * inten, rnd.uniform(-0.7, 0.7))
+        if inten > 0.35:
+            mix.add(t, glass_break(rnd, (1.45, 1.6), 0.06), 0.18 * inten, rnd.uniform(-0.5, 0.5))
+    else:  # R4-R5: fine glass scree
+        for _ in range(min(2, count)):
+            mix.add(t + rnd.uniform(0.0, 0.01), glass_grain(rnd, 0.006, 0.014, (1.3, 1.6)), 0.07 + 0.14 * inten, rnd.uniform(-0.85, 0.85))
+    STATS['v2_clatter'] = STATS.get('v2_clatter', 0) + 1
+
+
 def v2_slash(mix, t, inten, rnd):
+    if GLASS:
+        return glass_slash(mix, t, inten, rnd)
     if NUC:
         mix.add(t - 0.09, ion_whoosh(rnd, rnd.uniform(0.92, 1.04), 0.36), 0.64 * inten, rnd.uniform(-0.3, 0.3))
         mix.add(t, zap(rnd), 0.42 * inten, rnd.uniform(-0.2, 0.2))
@@ -635,6 +800,8 @@ def v2_slash(mix, t, inten, rnd):
 
 
 def v2_fan(mix, t, inten, blades, rnd):
+    if GLASS:
+        return glass_fan(mix, t, inten, blades, rnd)
     if NUC:
         for k, (p, off, pan) in enumerate(((0.88, -0.015, -0.55), (0.98, 0.0, 0.0), (1.08, 0.012, 0.55))):
             mix.add(t - 0.09 + off, ion_whoosh(rnd, p * rnd.uniform(0.97, 1.03), 0.4), (0.4 if k != 1 else 0.5) * inten, pan)
@@ -791,6 +958,8 @@ def v2_impact_nuclear(mix, t, tier, rnd, boost):
 
 def v2_impact(mix, t, tier, rnd):
     boost = 10 ** (2.5 / 20) if tier <= 1 else 1.0  # R1 punch: +2.5 dB (master re-normalises to -1.0 dBFS, soft limiter = no clipping)
+    if GLASS:
+        return glass_impact(mix, t, tier, rnd, boost)
     if NUC:
         return v2_impact_nuclear(mix, t, tier, rnd, boost)
     if PLASTIC:
@@ -852,6 +1021,8 @@ def v2_impact(mix, t, tier, rnd):
 
 
 def v2_clatter(mix, t, count, inten, rnd, rnd_idx=0):
+    if GLASS:
+        return glass_clatter(mix, t, count, inten, rnd, rnd_idx)
     if NUC:
         if rnd_idx <= 2:  # R1-R3: ringing-heavy titanium shell-casing clatter + a dry Geiger tick
             for _ in range(min(3, count)):
@@ -964,7 +1135,9 @@ def main_v2(events, a):
     pauses = []
     for e in events:
         t, ty, inten = e['time'], e['type'], float(e.get('intensity', 1.0))
-        if ty == 'slash':
+        if ty == 'slash' and GLASS and e.get('blitz'):
+            glass_blitz(mix, t, inten, int(e.get('idx', 0)), int(e.get('n', 1)), float(e.get('dur', 0.08)), rnd)
+        elif ty == 'slash':
             v2_slash(mix, t, inten, rnd)
         elif ty == 'fan_slash':
             v2_fan(mix, t, inten, int(e.get('blades', 8)), rnd)
@@ -975,7 +1148,7 @@ def main_v2(events, a):
         elif ty == 'clatter':
             if e.get('round', -1) in (0, 1, 2):
                 v2_clatter(mix, t, int(e.get('count', 1)), inten, rnd, e.get('round', 0))
-            elif (OBS or EARTH or ICE or PLASTIC or NUC) and e.get('round', -1) in (3, 4, 5) and rnd.random() < 0.5:
+            elif (OBS or EARTH or ICE or PLASTIC or NUC or GLASS) and e.get('round', -1) in (3, 4, 5) and rnd.random() < 0.5:
                 v2_clatter(mix, t, int(e.get('count', 1)), inten, rnd, e.get('round', 3))
         elif ty == 'transition':
             v2_whoosh(mix, t, 0.25, 0.32, 1.25, rnd)
@@ -983,6 +1156,8 @@ def main_v2(events, a):
             v2_whoosh(mix, t - 0.05, 0.45, 0.5, 1.0, rnd)
         elif ty == 'tension_pause':
             pauses.append((t, float(e['until'])))
+        elif ty == 'shimmer' and GLASS:  # soft sparse glints on the settled glass pile (no dead air before the rewind)
+            glass_shower(mix, rnd, t, float(e['until']) - t, 26.0, 0.1 * inten, 0.9)
         elif ty == 'rewind':
             v2_rewind(mix, t, min(total, float(e['until'])), aval_last, rnd)
     for a0, b0 in pauses:
@@ -1026,15 +1201,16 @@ def main():
     ap.add_argument('--tail', type=float, default=1.0, help='extra seconds after last event')
     ap.add_argument('--duration', type=float, default=None, help='force total length in seconds')
     ap.add_argument('--seed', type=int, default=7)
-    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear'], default='obsidian', help='recipe.audioProfile')
+    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass'], default='obsidian', help='recipe.audioProfile')
     a = ap.parse_args()
-    global PROFILE, OBS, EARTH, ICE, PLASTIC, NUC
+    global PROFILE, OBS, EARTH, ICE, PLASTIC, NUC, GLASS
     PROFILE = a.audio_profile
     OBS = PROFILE == 'slizzy_obsidian'
     EARTH = PROFILE == 'slizzy_earth'
     ICE = PROFILE == 'slizzy_ice'
     PLASTIC = PROFILE == 'slizzy_plastic'
     NUC = PROFILE == 'slizzy_nuclear'
+    GLASS = PROFILE == 'slizzy_glass'
 
     with open(a.events, encoding='utf-8') as f:
         events = sorted(json.load(f), key=lambda e: e['time'])
@@ -1043,7 +1219,7 @@ def main():
         BANK[key] = load_sample(key + '.wav')
     print(f'audio profile: {PROFILE}')
     print('samples: ' + ', '.join(f'{k}={"live " + os.path.basename(v["path"]) if v else "synth fallback"}' for k, v in BANK.items()))
-    if PROFILE in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear'):
+    if PROFILE in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass'):
         mix, total, pauses = main_v2(events, a)
     else:
         total = a.duration if a.duration else (max((e['time'] for e in events), default=0.0) + a.tail + 0.6)
@@ -1065,7 +1241,7 @@ def main():
         w = windows.get(e['round'])
         return e.get('phase') == 'pour' or (w is not None and w[0] - 0.05 <= e['time'] <= w[1] + POUR_FADE)
 
-    for e in (events if PROFILE not in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear') else []):
+    for e in (events if PROFILE not in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass') else []):
         t, ty, inten, tool = e['time'], e['type'], float(e.get('intensity', 1.0)), e.get('tool', '')
         if ty == 'drop':
             voice_drop(mix, t, inten, rnd)
