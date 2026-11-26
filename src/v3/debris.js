@@ -162,6 +162,7 @@ export async function createDebrisV3({ recipe, profile, scene, G, A, stemLeaf, k
         .setRotation({ x: qa.x, y: qa.y, z: qa.z, w: qa.w }).setLinvel(vw.x, vw.y, vw.z).setAngvel({ x: w[0], y: w[1], z: w[2] })
         .setLinearDamping(R.damping?.[0] ?? 0.3).setAngularDamping(R.damping?.[1] ?? 1.4));
       const cdesc = RAPIER.ColliderDesc.convexHull(S.hulls[i]) || RAPIER.ColliderDesc.cuboid(S.half[i * 3], S.half[i * 3 + 1], S.half[i * 3 + 2]);
+      if (S.n === 2 && R.split?.frictionMin) cdesc.setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min); // v3.2 orange: halves pivot cut-face-up in place instead of rolling off
       world.createCollider(cdesc.setFriction(S.n === 2 ? (R.split?.friction ?? 0.7) : 0.7).setRestitution(0.15).setDensity(1), body);
       S.bodies.push(body);
       S.vel[i * 3 + 1] = vw.y;

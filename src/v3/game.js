@@ -14,6 +14,8 @@ import { createDebrisV3 } from './debris.js';
 import { createCameraRigV3 } from './camera.js';
 import { wedgeInfo } from './watermelon.js';
 import { makeMelonMaterial, makeMelonSeeds, makeGoldNugget, MELON } from './melon-materials.js';
+import { orangeInfo } from './orange.js';
+import { makeOrangeMaterial, makeOrangeStem, makeBlueCrystal, ORANGE } from './orange-materials.js';
 
 /** recipe.v3 carries the v2 schedule schema (+ studio / razor / kinetics); round "lift" = height above the resting pose. */
 function normalise(recipe, A) {
@@ -142,9 +144,81 @@ function melonKit(recipe, A) {
   };
 }
 
+/** v3.2 Crystal Glass Orange: same contract as createApple() (stem + 2 leaves ride on the top piece; no inner core). */
+function createOrange(recipe, A) {
+  const pal = recipe.palette, oc = recipe.object;
+  const seamCfg = { width: 0.008, glow: 1.6, flash: 6, ...(recipe.v2.seam ?? {}) };
+  const [c1, c2] = pal.seam ?? ['#fff3b0', '#ffb703'];
+  const U = {
+    uSN: { value: new THREE.Vector3(1, 1, 1) }, uSLo: { value: new THREE.Vector3(1, 1, 1) }, uSHi: { value: new THREE.Vector3(1, 1, 1) },
+    uSRev: { value: new THREE.Vector3() }, uSFlash: { value: new THREE.Vector3() }, uSW: { value: new THREE.Vector3(0.01, 0.01, 0.01) },
+    uHalf: { value: new THREE.Vector3(A.size[0] / 2, A.size[1] / 2, A.size[2] / 2) }, uSCol: { value: new THREE.Color(c1) }, uSCol2: { value: new THREE.Color(c2) },
+    uSGlow: { value: seamCfg.glow }, uSFl: { value: seamCfg.flash }, uSAlpha: { value: 1 },
+    uSDir: { value: new THREE.Vector3(1, 1, 1) }, uSYX: { value: 0 },
+  };
+  const mat = makeOrangeMaterial(A, oc.glass ?? {}, U);
+  const mesh = new THREE.Mesh(applePieceGeometry(wholeApple(A.triangles())).geometry, mat);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  const stemLeaf = makeOrangeStem(A, oc.stem ?? {});
+  const frame = new THREE.Group();
+  frame.add(mesh, stemLeaf.group);
+  return {
+    frame, mesh, stemLeaf,
+    setPose(y, yaw) { frame.position.set(0, y, 0); frame.rotation.set(0, yaw, 0); frame.updateMatrixWorld(true); },
+    setVisible(v) { mesh.visible = v; },
+    reclaimStem() { if (stemLeaf.group.parent !== frame) { frame.add(stemLeaf.group); stemLeaf.group.position.set(0, 0, 0); stemLeaf.group.rotation.set(0, 0, 0); } },
+    setSeams(s) {
+      const [nx, ny, nz] = s.grid;
+      U.uSN.value.set(nx, ny, nz);
+      U.uSLo.value.set(s.axes[0].lo, s.axes[1].lo, s.axes[2].lo);
+      U.uSHi.value.set(s.axes[0].hi, s.axes[1].hi, s.axes[2].hi);
+      U.uSRev.value.set(s.axes[0].rev, s.axes[1].rev, s.axes[2].rev);
+      U.uSFlash.value.set(s.axes[0].flash, s.axes[1].flash, s.axes[2].flash);
+      const w = (n) => seamCfg.width / Math.max(1, n - 1) + 0.0009;
+      U.uSW.value.set(w(nx), w(ny), w(nz));
+      const dens = Math.max(1, Math.max(nx, ny, nz) - 1), k = Math.min(1, Math.max(0.045, 1.4 / dens));
+      U.uSGlow.value = seamCfg.glow * s.pulse * k;
+      U.uSFl.value = seamCfg.flash * Math.min(1, Math.max(0.06, 1.2 / dens));
+      U.uSAlpha.value = s.alpha;
+      U.uSDir.value.set(s.axes[0].dir, s.axes[1].dir, s.axes[2].dir);
+      U.uSYX.value = s.axes[1].alongX;
+    },
+  };
+}
+
+/**
+ * Debris kit of the orange: layered piece glass (one cyan crystal per round on the cut faces), small cyan hero crystal in R5,
+ * citrus shard mix for R4-R5 by real fruit layer: ~68% amber pulp, ~18% tangerine peel, ~11% milky membranes, ~3% emerald leaf.
+ */
+function orangeKit(recipe, A) {
+  const pal = recipe.palette, oc = recipe.object, C = (c) => new THREE.Color(c);
+  const sh = pal.shards ?? {}, mix = { peelKeep: 0.56, whiteKeep: 0.4, membrane: 0.022, leafTop: 0.11, ...(oc.shardMix ?? {}) };
+  const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+  const matP = makeOrangeMaterial(A, { ...(oc.glass ?? {}), ...(oc.caps ?? {}) });
+  return {
+    pieceMat: matP,
+    gemMesh: (ep) => makeBlueCrystal(ep),
+    setRound: (k) => matP.userData.setRound(k), // round k inlays only crystal k on the cut faces (R4-R5: none)
+    look: {
+      pulp: [C(sh.pulp?.[0] ?? ORANGE.pulp[0]), C(sh.pulp?.[1] ?? ORANGE.pulp[1]), sh.pulpHeat ?? 0.14],
+      peel: [C(sh.peel?.[0] ?? ORANGE.peel[0]), C(sh.peel?.[1] ?? ORANGE.peel[1]), sh.peelHeat ?? 0.06],
+      white: [C(sh.white?.[0] ?? '#fff0dc'), C(sh.white?.[1] ?? ORANGE.albedo), sh.whiteHeat ?? 0.04],
+      leaf: [C(sh.leaf?.[0] ?? ORANGE.leaf[0]), C(sh.leaf?.[1] ?? ORANGE.leaf[1]), sh.leafHeat ?? 0.12],
+    },
+    kind(i, x, y, z) {
+      const h = hash(i * 7.31 + 11), h2 = hash(i * 3.77 + 5);
+      if (y > 0.35 * A.Hh && h < mix.leafTop) return 'leaf'; // emerald leaf glass from the top of the fruit
+      const L = A.layer(x, y, z, mix.membrane);
+      if (L === 'peel') return h2 < mix.peelKeep ? 'peel' : 'pulp';
+      if (L === 'pulp') return 'pulp';
+      return h2 < mix.whiteKeep ? 'white' : 'pulp'; // albedo ring, membranes, core
+    },
+  };
+}
+
 export async function createGameV3(profile, recipe0) {
-  const melon = recipe0.object.shape === 'watermelon-wedge';
-  const A = melon ? wedgeInfo(recipe0.object) : appleInfo(recipe0.object);
+  const melon = recipe0.object.shape === 'watermelon-wedge', orange = recipe0.object.shape === 'crystal-orange';
+  const A = melon ? wedgeInfo(recipe0.object) : orange ? orangeInfo(recipe0.object) : appleInfo(recipe0.object);
   const recipe = normalise(recipe0, A);
   const pal = recipe.palette;
   const cellCount = (g, physics) => appleCellKeep(A, g, physics === 'rapier' ? 'volume' : 'center').count;
@@ -155,11 +229,11 @@ export async function createGameV3(profile, recipe0) {
   const st = createStudio(profile, recipe);
   const { scene, camera, knifeLight, blob } = st;
   const hold = recipe.v2.hold, sideBase = st.side.position.clone(), rimBase = st.rim.position.clone();
-  const apple = melon ? createMelon(recipe, A) : createApple(recipe, A);
+  const apple = melon ? createMelon(recipe, A) : orange ? createOrange(recipe, A) : createApple(recipe, A);
   scene.add(apple.frame);
   const blades = createBladesV3(recipe, knifeLight);
   apple.frame.add(blades.holder);
-  const debris = await createDebrisV3({ recipe, profile, scene, G: tl.G, A, stemLeaf: apple.stemLeaf, kit: melon ? melonKit(recipe, A) : null });
+  const debris = await createDebrisV3({ recipe, profile, scene, G: tl.G, A, stemLeaf: apple.stemLeaf, kit: melon ? melonKit(recipe, A) : orange ? orangeKit(recipe, A) : null });
   const fx = createFx({ recipe: { ...recipe, object: { ...recipe.object, shape: 'sphere' } }, profile, scene, tl });
   const rig = createCameraRigV3(recipe, tl, profile);
   const hud = createHudV2(profile, recipe, tl);

@@ -321,7 +321,7 @@ export function appleCellKeep(A, grid, mode = 'center', minFrac = 0.03) {
   for (let a = 0; a < nx; a++) for (let b = 0; b < ny; b++) for (let c = 0; c < nz; c++, i++) {
     const lo = [-W / 2 + a * cw, -H / 2 + b * ch, -D / 2 + c * cd], hi = [lo[0] + cw, lo[1] + ch, lo[2] + cd];
     if (mode === 'center') { keep[i] = A.inside(lo[0] + cw / 2, lo[1] + ch / 2, lo[2] + cd / 2) ? 1 : 0; continue; }
-    const clip = clipAppleCell(tris, A, lo, hi);
+    const clip = A.fixClip ? A.fixClip(clipAppleCell(tris, A, lo, hi)) : clipAppleCell(tris, A, lo, hi); // opt-in cap post-process (v3.2 orange only)
     keep[i] = clip.volume >= minFrac * cw * ch * cd ? 1 : 0;
     clips.push(keep[i] ? { clip, lo, hi } : null);
   }
