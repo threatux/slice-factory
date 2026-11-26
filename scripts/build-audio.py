@@ -31,6 +31,10 @@ Uses the live samples public/audio/{chop,crackle,whoosh}.wav (soft synthesis onl
     sweeping SVF low-pass, no oscillator) + crunchy glass break (chop.wav 1.35-1.60x) + bright shower of fine glass
     (multi-layer crackle.wav micro transients band 2.8-9.5 kHz); R4-R5 = sparkling cascade of glass shards on stone, dead silence
     in the tension pauses, clean reverse at the end. GLASS branches only: the 6 earlier profiles are untouched.
+  * "slizzy_juicy_glass" (v3.1 Crystal Glass Watermelon): the slizzy_glass voice set (GLASS = True) plus JUICY-only layers:
+    a crunchier, juicier first fracture (extra low-pitched chop.wav break 1.18-1.32x + a dense 0.3 s crackle.wav 'crunch'
+    burst band 1.2-6.5 kHz) and a sparkling marble scatter in R4-R5 (denser cascade + bright 5-11 kHz glass ticks bouncing on
+    stone). Noise / sample based only (no oscillators); every earlier profile, slizzy_glass included, renders bit-identically.
   * --audio-profile (recipe.audioProfile): "obsidian" (default, unchanged) | "metal_crystal" (gold bar / emerald core):
     R1-R2 heavy chop.wav (pitch 0.96-1.08, 120-260 Hz body accent) + dry emerald chip from crackle.wav (15-28 ms, HP 2.4 kHz, -8 dB);
     dense runs crossfade into HP 2.4 kHz crystal crumb (no synthetic sines anywhere); pour R4 pitch 0.98-1.10, R5 pitch 1.22-1.40 + 5-9 kHz accent;
@@ -57,6 +61,7 @@ ICE = False  # True for 'slizzy_ice' (cryo ice sphere: dry ice block + glassy ic
 PLASTIC = False  # True for 'slizzy_plastic' (Rubik's cube: hard ABS clicks + LEGO rattle)
 NUC = False  # True for 'slizzy_nuclear' (uranium fuel rod: titanium knock + Geiger crackle)
 GLASS = False  # True for 'slizzy_glass' (v3 crystal glass apple: crystal whistle + glass shatter)
+JUICY = False  # True for 'slizzy_juicy_glass' (v3.1 crystal watermelon: slizzy_glass + juicy crunch + marble sparkle); implies GLASS
 
 
 class Mix:
@@ -717,6 +722,22 @@ def glass_cascade(rnd, length, density):
     return L, R
 
 
+def juicy_crunch(mix, rnd, t, length, gain):
+    """slizzy_juicy_glass: dense crisp-wet crunch of the first fracture (crackle.wav grains band 1.2-6.5 kHz, 4-14 ms, tight gaps)."""
+    tau = 0.0
+    while tau < length:
+        env = math.exp(-tau / (length * 0.35))
+        x = fade_out(bandpass(crackle(rnd, rnd.uniform(0.004, 0.014), rnd.uniform(0.85, 1.2)), 1200.0, 6500.0), 0.003)
+        mix.add(t + tau, x, gain * env * rnd.uniform(0.5, 1.0), rnd.uniform(-0.5, 0.5))
+        STATS['juicy_crunch'] = STATS.get('juicy_crunch', 0) + 1
+        tau += rnd.expovariate(260.0 * (0.35 + 0.65 * env))
+
+
+def marble_tick(rnd):
+    """slizzy_juicy_glass: bright glass bead bouncing on polished marble (crackle.wav band 5-11 kHz, 3-7 ms)."""
+    return fade_out(bandpass(crackle(rnd, rnd.uniform(0.003, 0.007), rnd.uniform(1.4, 1.9)), 5000.0, 11000.0), 0.002)
+
+
 def glass_impact(mix, t, tier, rnd, boost):
     """slizzy_glass impact_shatter: springy noise sub 88 -> 32 Hz + crunchy glass break + bright fine-glass shower."""
     mix.add(t, nuclear_sub(rnd, 0.45, 88.0, 32.0, 0.09), (0.9 + 0.07 * min(tier, 4)) * boost)
@@ -726,6 +747,9 @@ def glass_impact(mix, t, tier, rnd, boost):
     if tier <= 1:  # two thick crystal halves: second break + a short shower
         mix.add(t + 0.06, glass_break(rnd, (1.4, 1.6), 0.12), 0.55 * boost, 0.25)
         glass_shower(mix, rnd, t + 0.008, 0.45, 70.0, 0.36 * boost)
+        if JUICY:  # juicy watermelon glass: lower crunchy break body + dense crackle crunch on the first fracture
+            mix.add(t + 0.012, glass_break(rnd, (1.18, 1.32), 0.16), 0.5 * boost, -0.3)
+            juicy_crunch(mix, rnd, t + 0.004, 0.32, 0.42 * boost)
     elif tier == 2:  # cascade of breaks + dense shower
         for k in range(5):
             mix.add(t + rnd.uniform(0.03, 0.3), glass_break(rnd, (1.4, 1.6), 0.08), 0.3 * math.exp(-k / 4.0), rnd.uniform(-0.6, 0.6))
@@ -737,7 +761,14 @@ def glass_impact(mix, t, tier, rnd, boost):
             boom[i] *= math.exp(-(i / SR) / 0.08)
         mix.add(t, boom, 1.8)
         length = 3.2 if tier >= 4 else 1.9
-        aval = glass_cascade(rnd, length, 260.0 if tier >= 4 else 170.0)
+        aval = glass_cascade(rnd, length, (300.0 if tier >= 4 else 200.0) if JUICY else (260.0 if tier >= 4 else 170.0))
+        if JUICY:  # sparkling marble scatter: bright beads bouncing on polished stone (stereo, decaying)
+            tau = 0.0
+            while tau < length * 0.85:
+                env = math.exp(-tau / (length * 0.32))
+                mix.add(t + 0.02 + tau, marble_tick(rnd), 0.22 * env * rnd.uniform(0.4, 1.0), rnd.uniform(-0.95, 0.95))
+                STATS['marble_tick'] = STATS.get('marble_tick', 0) + 1
+                tau += rnd.expovariate(150.0 * (0.25 + 0.75 * env))
         i0 = int((t + 0.008) * SR)
         for k in range(min(len(aval[0]), mix.n - i0)):
             mix.L[i0 + k] += aval[0][k]
@@ -1201,16 +1232,17 @@ def main():
     ap.add_argument('--tail', type=float, default=1.0, help='extra seconds after last event')
     ap.add_argument('--duration', type=float, default=None, help='force total length in seconds')
     ap.add_argument('--seed', type=int, default=7)
-    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass'], default='obsidian', help='recipe.audioProfile')
+    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass', 'slizzy_juicy_glass'], default='obsidian', help='recipe.audioProfile')
     a = ap.parse_args()
-    global PROFILE, OBS, EARTH, ICE, PLASTIC, NUC, GLASS
+    global PROFILE, OBS, EARTH, ICE, PLASTIC, NUC, GLASS, JUICY
     PROFILE = a.audio_profile
     OBS = PROFILE == 'slizzy_obsidian'
     EARTH = PROFILE == 'slizzy_earth'
     ICE = PROFILE == 'slizzy_ice'
     PLASTIC = PROFILE == 'slizzy_plastic'
     NUC = PROFILE == 'slizzy_nuclear'
-    GLASS = PROFILE == 'slizzy_glass'
+    JUICY = PROFILE == 'slizzy_juicy_glass'
+    GLASS = PROFILE == 'slizzy_glass' or JUICY
 
     with open(a.events, encoding='utf-8') as f:
         events = sorted(json.load(f), key=lambda e: e['time'])
@@ -1219,7 +1251,7 @@ def main():
         BANK[key] = load_sample(key + '.wav')
     print(f'audio profile: {PROFILE}')
     print('samples: ' + ', '.join(f'{k}={"live " + os.path.basename(v["path"]) if v else "synth fallback"}' for k, v in BANK.items()))
-    if PROFILE in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass'):
+    if PROFILE in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass', 'slizzy_juicy_glass'):
         mix, total, pauses = main_v2(events, a)
     else:
         total = a.duration if a.duration else (max((e['time'] for e in events), default=0.0) + a.tail + 0.6)
@@ -1241,7 +1273,7 @@ def main():
         w = windows.get(e['round'])
         return e.get('phase') == 'pour' or (w is not None and w[0] - 0.05 <= e['time'] <= w[1] + POUR_FADE)
 
-    for e in (events if PROFILE not in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass') else []):
+    for e in (events if PROFILE not in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass', 'slizzy_juicy_glass') else []):
         t, ty, inten, tool = e['time'], e['type'], float(e.get('intensity', 1.0)), e.get('tool', '')
         if ty == 'drop':
             voice_drop(mix, t, inten, rnd)

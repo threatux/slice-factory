@@ -203,7 +203,7 @@ export function buildTimelineV2(recipe, profile, opts = {}) {
       s.flash = t < P.t1 ? 1 : Math.exp(-(t - P.t1) / 0.22);
     }
     // loop closure: the re-assembled ingot sheds its seams over the last (duration - converge) s, so frame(end) === frame(0)
-    if (t >= fin.converge) { const u = clamp01((t - fin.converge) / Math.max(1e-6, duration - fin.converge)); alpha = 1 - u * u * (3 - 2 * u); }
+    if (t >= fin.converge) { const u = clamp01((t - fin.converge) / Math.max(1e-6, (fin.seamEnd ?? duration) - fin.converge)); alpha = 1 - u * u * (3 - 2 * u); }
     const R = ctx === hook ? null : ctx;
     const pulse = R && R.pulse ? 0.75 + 0.25 * Math.sin(t * 2 * Math.PI * 2.2) : 1;
     return { grid: ctx.grid, axes: st, alpha, pulse, round: R ? R.index : -1 };

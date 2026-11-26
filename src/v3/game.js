@@ -12,6 +12,8 @@ import { makeAppleShellMaterial, makeStemLeaf, makeInnerCore } from './materials
 import { createBladesV3 } from './blades.js';
 import { createDebrisV3 } from './debris.js';
 import { createCameraRigV3 } from './camera.js';
+import { wedgeInfo } from './watermelon.js';
+import { makeMelonMaterial, makeMelonSeeds, makeGoldNugget, MELON } from './melon-materials.js';
 
 /** recipe.v3 carries the v2 schedule schema (+ studio / razor / kinetics); round "lift" = height above the resting pose. */
 function normalise(recipe, A) {
@@ -72,8 +74,77 @@ function createApple(recipe, A) {
   };
 }
 
+/** v3.1 Crystal Glass Watermelon wedge: same contract as createApple() (no stem; inner seeds instead of the star core). */
+function createMelon(recipe, A) {
+  const pal = recipe.palette, oc = recipe.object;
+  const seamCfg = { width: 0.008, glow: 1.6, flash: 6, ...(recipe.v2.seam ?? {}) };
+  const [c1, c2] = pal.seam ?? ['#fff3b0', '#ffd000'];
+  const U = {
+    uSN: { value: new THREE.Vector3(1, 1, 1) }, uSLo: { value: new THREE.Vector3(1, 1, 1) }, uSHi: { value: new THREE.Vector3(1, 1, 1) },
+    uSRev: { value: new THREE.Vector3() }, uSFlash: { value: new THREE.Vector3() }, uSW: { value: new THREE.Vector3(0.01, 0.01, 0.01) },
+    uHalf: { value: new THREE.Vector3(A.size[0] / 2, A.size[1] / 2, A.size[2] / 2) }, uSCol: { value: new THREE.Color(c1) }, uSCol2: { value: new THREE.Color(c2) },
+    uSGlow: { value: seamCfg.glow }, uSFl: { value: seamCfg.flash }, uSAlpha: { value: 1 },
+    uSDir: { value: new THREE.Vector3(1, 1, 1) }, uSYX: { value: 0 },
+  };
+  const mat = makeMelonMaterial(A, oc.glass ?? {}, U);
+  const mesh = new THREE.Mesh(applePieceGeometry(wholeApple(A.triangles())).geometry, mat);
+  mesh.castShadow = true; mesh.receiveShadow = true;
+  const seeds = makeMelonSeeds(A, oc.seeds ?? {});
+  const frame = new THREE.Group();
+  frame.add(mesh, seeds);
+  return {
+    frame, mesh, stemLeaf: null,
+    setPose(y, yaw) { frame.position.set(0, y, 0); frame.rotation.set(0, yaw, 0); frame.updateMatrixWorld(true); },
+    setVisible(v) { mesh.visible = v; seeds.visible = v; },
+    reclaimStem() {},
+    setSeams(s) {
+      const [nx, ny, nz] = s.grid;
+      U.uSN.value.set(nx, ny, nz);
+      U.uSLo.value.set(s.axes[0].lo, s.axes[1].lo, s.axes[2].lo);
+      U.uSHi.value.set(s.axes[0].hi, s.axes[1].hi, s.axes[2].hi);
+      U.uSRev.value.set(s.axes[0].rev, s.axes[1].rev, s.axes[2].rev);
+      U.uSFlash.value.set(s.axes[0].flash, s.axes[1].flash, s.axes[2].flash);
+      const w = (n) => seamCfg.width / Math.max(1, n - 1) + 0.0009;
+      U.uSW.value.set(w(nx), w(ny), w(nz));
+      const dens = Math.max(1, Math.max(nx, ny, nz) - 1), k = Math.min(1, Math.max(0.045, 1.4 / dens));
+      U.uSGlow.value = seamCfg.glow * s.pulse * k;
+      U.uSFl.value = seamCfg.flash * Math.min(1, Math.max(0.06, 1.2 / dens));
+      U.uSAlpha.value = s.alpha;
+      U.uSDir.value.set(s.axes[0].dir, s.axes[1].dir, s.axes[2].dir);
+      U.uSYX.value = s.axes[1].alongX;
+    },
+  };
+}
+
+/** Debris kit of the watermelon: layered piece glass, gold nugget hero, R4-R5 shard palette (gold seeds -> the nugget only). */
+function melonKit(recipe, A) {
+  const pal = recipe.palette, oc = recipe.object, C = (c) => new THREE.Color(c);
+  const sh = pal.shards ?? {};
+  const seedTop = oc.seedShards ?? 0.035;
+  const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+  const matP = makeMelonMaterial(A, { ...(oc.glass ?? {}), ...(oc.caps ?? {}) });
+  return {
+    pieceMat: matP,
+    gemMesh: (ep) => makeGoldNugget(ep),
+    setRound: (k) => matP.userData.setRound(k), // round k paints only gold seed k on the cut faces
+    look: {
+      flesh: [C(sh.flesh?.[0] ?? MELON.flesh[0]), C(sh.flesh?.[1] ?? MELON.flesh[1]), sh.fleshHeat ?? 0.12],
+      rind: [C(sh.rind?.[0] ?? MELON.rind[0]), C(sh.rind?.[1] ?? MELON.rind[1]), sh.rindHeat ?? 0.04],
+      pith: [C(sh.pith?.[0] ?? '#e9f2e0'), C(sh.pith?.[1] ?? MELON.pith), sh.pithHeat ?? 0.05],
+      seed: [C('#050507'), C('#1c1a22'), 0.0],
+    },
+    kind(i, x, y, z) {
+      const L = A.layer(x, y, z);
+      if (L === 'gold') return 'flesh'; // the 3 gold seeds are counted on the cuts; in the pile only the hero nugget glows
+      if (L === 'flesh' && hash(i * 7.31 + 11) < seedTop) return 'seed';
+      return L;
+    },
+  };
+}
+
 export async function createGameV3(profile, recipe0) {
-  const A = appleInfo(recipe0.object);
+  const melon = recipe0.object.shape === 'watermelon-wedge';
+  const A = melon ? wedgeInfo(recipe0.object) : appleInfo(recipe0.object);
   const recipe = normalise(recipe0, A);
   const pal = recipe.palette;
   const cellCount = (g, physics) => appleCellKeep(A, g, physics === 'rapier' ? 'volume' : 'center').count;
@@ -84,11 +155,11 @@ export async function createGameV3(profile, recipe0) {
   const st = createStudio(profile, recipe);
   const { scene, camera, knifeLight, blob } = st;
   const hold = recipe.v2.hold, sideBase = st.side.position.clone(), rimBase = st.rim.position.clone();
-  const apple = createApple(recipe, A);
+  const apple = melon ? createMelon(recipe, A) : createApple(recipe, A);
   scene.add(apple.frame);
   const blades = createBladesV3(recipe, knifeLight);
   apple.frame.add(blades.holder);
-  const debris = await createDebrisV3({ recipe, profile, scene, G: tl.G, A, stemLeaf: apple.stemLeaf });
+  const debris = await createDebrisV3({ recipe, profile, scene, G: tl.G, A, stemLeaf: apple.stemLeaf, kit: melon ? melonKit(recipe, A) : null });
   const fx = createFx({ recipe: { ...recipe, object: { ...recipe.object, shape: 'sphere' } }, profile, scene, tl });
   const rig = createCameraRigV3(recipe, tl, profile);
   const hud = createHudV2(profile, recipe, tl);
@@ -125,7 +196,7 @@ export async function createGameV3(profile, recipe0) {
     else if (debris.active && !justSpawned) debris.step(dt, t);
     if (visible) apple.reclaimStem();
     apple.setVisible(visible);
-    apple.stemLeaf.group.visible = visible || debris.holdsStem();
+    if (apple.stemLeaf) apple.stemLeaf.group.visible = visible || debris.holdsStem();
 
     apple.setSeams(tl.seamState(t));
     const passes = t < rounds[0].start ? tl.hook.passes : r >= 0 ? rounds[r].passes : [];
@@ -143,6 +214,12 @@ export async function createGameV3(profile, recipe0) {
     blob.visible = visible;
     blob.scale.setScalar(blobBase * (1 + 0.9 * lift));
     blob.material.opacity = (recipe.v3.studio?.blobOpacity ?? 0.8) * Math.exp(-2.4 * lift);
+    if (st.caustic) { // v3.1 bright studio: soft ruby glow the glass throws onto the stone (follows the intact object like the blob)
+      const cs = recipe.v3.studio.caustic;
+      st.caustic.visible = visible;
+      st.caustic.scale.set(A.W * cs.scale[0] * (1 + 0.6 * lift), 1, A.W * cs.scale[1] * (1 + 0.6 * lift));
+      st.caustic.material.opacity = cs.opacity * Math.exp(-2.0 * lift);
+    }
 
     const cl = debris.drainClatter();
     if (cl.length) runtimeEvents.push({ time: t, type: 'clatter', round: r, count: cl.length, intensity: Math.min(1, Math.max(...cl) / 12) });

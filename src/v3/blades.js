@@ -21,6 +21,21 @@ export function createBladesV3(recipe, knifeLight) {
     emissive: kc.emissive ?? '#000000', emissiveIntensity: kc.emissiveIntensity ?? 0, bumpMap: dam.bump, bumpScale: kc.damascus ?? 0.22,
     clearcoat: 0.5, clearcoatRoughness: 0.04, envMapIntensity: kc.envMapIntensity ?? 1.9, side: THREE.DoubleSide,
   });
+  if (kc.bevel) { // v3.1 dark forged steel: the ground cutting bevel (uv.y < GRIND) is a separately polished bright mirror edge
+    const bev = new THREE.Color(kc.bevel);
+    chrome.onBeforeCompile = (sh) => {
+      sh.uniforms.uBevel = { value: bev };
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vBvV;').replace('#include <begin_vertex>', '#include <begin_vertex>\nvBvV = uv.y;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform vec3 uBevel; varying float vBvV;')
+        .replace('#include <color_fragment>', `#include <color_fragment>
+float bvW = 1.0 - smoothstep(${(GRIND * 0.92).toFixed(4)}, ${(GRIND * 1.02).toFixed(4)}, vBvV);
+diffuseColor.rgb = mix(diffuseColor.rgb, uBevel, bvW);`)
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, ${(kc.bevelRoughness ?? 0.04).toFixed(3)}, bvW);`)
+        .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor = mix(metalnessFactor, 1.0, bvW);');
+    };
+    chrome.customProgramCacheKey = () => 'knife-bevel-v31';
+  }
   const knife = new THREE.Group();
   const blade = new THREE.Mesh(geo, chrome);
   blade.castShadow = true;
@@ -71,10 +86,12 @@ export function createBladesV3(recipe, knifeLight) {
   const bc = { history: 0.07, steps: 8, samples: 12, sparks: 7, sparkLife: 0.13, sparkSpeed: 3.4, gold: '#ffc233', steel: '#cfe6ff', ...(recipe.v3.blitz ?? {}) };
   const LINES = [0, 0.3 * BH, 0.62 * BH]; // edge line + two inner lines of the blade body swept through the last `history` seconds
   const RK = bc.steps, RM = bc.samples, RV = (RK + 1) * LINES.length * (RM + 1);
-  const rPos = new Float32Array(RV * 3), rCol = new Float32Array(RV * 3);
+  const NB = bc.blend === 'normal'; // v3.1 bright studio: opaque-ish dark gold / steel smear (additive light vanishes on a light set)
+  const CS = NB ? 4 : 3;
+  const rPos = new Float32Array(RV * 3), rCol = new Float32Array(RV * CS);
   const rGeo = new THREE.BufferGeometry();
   rGeo.setAttribute('position', new THREE.BufferAttribute(rPos, 3).setUsage(THREE.DynamicDrawUsage));
-  rGeo.setAttribute('color', new THREE.BufferAttribute(rCol, 3).setUsage(THREE.DynamicDrawUsage));
+  rGeo.setAttribute('color', new THREE.BufferAttribute(rCol, CS).setUsage(THREE.DynamicDrawUsage));
   const rIdx = [];
   const vi = (l, k, m) => (l * (RK + 1) + k) * (RM + 1) + m;
   for (let l = 0; l < LINES.length; l++) for (let k = 0; k < RK; k++) for (let m = 0; m < RM; m++) {
@@ -82,7 +99,7 @@ export function createBladesV3(recipe, knifeLight) {
     rIdx.push(a, b, c, c, b, d);
   }
   rGeo.setIndex(rIdx);
-  const ribbon = new THREE.Mesh(rGeo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, side: THREE.DoubleSide }));
+  const ribbon = new THREE.Mesh(rGeo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: NB ? THREE.NormalBlending : THREE.AdditiveBlending, depthWrite: false, toneMapped: false, side: THREE.DoubleSide }));
   ribbon.frustumCulled = false; ribbon.renderOrder = 7; ribbon.visible = false;
   const SPN = 96, spPos = new Float32Array(SPN * 3), spCol = new Float32Array(SPN * 3);
   const spGeo = new THREE.BufferGeometry();
@@ -93,7 +110,7 @@ export function createBladesV3(recipe, knifeLight) {
   const dotTex = new THREE.CanvasTexture(dot);
   const sparks = new THREE.Points(spGeo, new THREE.PointsMaterial({ size: 0.05, map: dotTex, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, sizeAttenuation: true }));
   sparks.frustumCulled = false; sparks.renderOrder = 8; sparks.visible = false;
-  const cGold = new THREE.Color(bc.gold), cSteel = new THREE.Color(bc.steel), cHot = new THREE.Color('#fff4d0');
+  const cGold = new THREE.Color(bc.gold), cSteel = new THREE.Color(bc.steel), cHot = new THREE.Color(bc.hot ?? '#fff4d0');
 
   const holder = new THREE.Group();
   holder.add(knife, ...trails, ...plates.map((p) => p.g), ribbon, sparks);
@@ -149,12 +166,19 @@ export function createBladesV3(recipe, knifeLight) {
     for (let l = 0; l < LINES.length; l++) for (let k = 0; k <= RK; k++) {
       const ps = poses[k] ?? poses.find(Boolean) ?? now;
       const age = k / RK, fade = (1 - age) ** 3 * fast;
-      const base = l === 0 ? cGold : cSteel, inten = l === 0 ? 0.8 : l === 1 ? 0.1 : 0.035;
+      const base = l === 0 ? cGold : cSteel, inten = NB ? (bc.alpha ?? [0.85, 0.32, 0.16])[l] : l === 0 ? 0.8 : l === 1 ? 0.1 : 0.035;
       for (let m = 0; m <= RM; m++) {
         const xx = Pf.x0 + (m / RM) * (Pf.x1 - Pf.x0);
         bladePt(ps, xx, Pf.edge(xx) + LINES[l], tmpA);
         const j = vi(l, k, m) * 3;
         posA.array[j] = tmpA.x; posA.array[j + 1] = tmpA.y; posA.array[j + 2] = tmpA.z;
+        if (NB) {
+          const prof = Math.sin(Math.PI * Math.min(1, Math.max(0, (m / RM) * 0.92 + 0.04)));
+          const a = fade * inten * (0.35 + 0.65 * prof), jc = vi(l, k, m) * 4;
+          const cc = l === 0 ? tmpB.set(cHot.r, cHot.g, cHot.b).lerp(new V3(cGold.r, cGold.g, cGold.b), Math.min(1, age * 2.5)) : tmpB.set(base.r, base.g, base.b);
+          colA.array[jc] = cc.x; colA.array[jc + 1] = cc.y; colA.array[jc + 2] = cc.z; colA.array[jc + 3] = a;
+          continue;
+        }
         const prof = Math.sin(Math.PI * Math.min(1, Math.max(0, (m / RM) * 0.92 + 0.04))); // soft ends along the blade
         // head of the streak is bright steel-white; the thin edge line carries the gold spark, cooling toward the tail
         const g = fade * inten * (0.35 + 0.65 * prof);

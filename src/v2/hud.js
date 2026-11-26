@@ -8,7 +8,9 @@ const sm = (a, b, x) => { const u = clamp01((x - a) / (b - a)); return u * u * (
 export function createHudV2(profile, recipe, tl) {
   const V = recipe.v2, pal = recipe.palette;
   // recipe.v2.hud overrides (defaults reproduce the gold-emerald look 1:1)
-  const hc = { badgeFrom: pal.shell, badgeTo: '#ffe27a', badgeText: '#111', bonusFrom: pal.shell, bonusMid: '#fff3b0', bonusTo: pal.core, hot: pal.accent, ...(V.hud ?? {}) };
+  const hc = { badgeFrom: pal.shell, badgeTo: '#ffe27a', badgeText: '#111', bonusFrom: pal.shell, bonusMid: '#fff3b0', bonusTo: pal.core, hot: pal.accent,
+    ink: '#14171c', pill: 'rgba(18, 20, 26, 0.88)', pillText: '#ffffff', pillGold: '#ffd54a', finalTop: '22%', finalSize: '.036', ...(V.hud ?? {}) };
+  const light = hc.theme === 'light'; // v3.1 bright-marble studio: dark HUD (every earlier recipe keeps the white HUD)
   const bonusGrad = hc.bonusMid ? `${hc.bonusFrom}, ${hc.bonusMid} 45%, ${hc.bonusTo}` : `${hc.bonusFrom}, ${hc.bonusTo}`;
   const stage = document.getElementById('stage');
   stage.style.width = profile.width + 'px';
@@ -36,6 +38,20 @@ export function createHudV2(profile, recipe, tl) {
     #v2 #v2-count, #v2 #v2-final { text-shadow: 0 0 calc(var(--h) * .006) rgba(0,8,20,.95), 0 0 calc(var(--h) * .018) rgba(0,8,20,.9),
       0 0 calc(var(--h) * .036) rgba(0,8,20,.75), 0 calc(var(--h) * .003) calc(var(--h) * .005) rgba(0,0,0,.95); }
     #v2 #v2-label.bonus { filter: drop-shadow(0 0 calc(var(--h) * .006) rgba(0,8,20,.95)) drop-shadow(0 0 calc(var(--h) * .02) rgba(0,8,20,.8)); }
+  ` : '') + (light ? `
+    /* v3.1 light theme (bright studio): charcoal type with a clean white halo, dark translucent pills for the bait lines */
+    #v2 { color: ${hc.ink}; }
+    #v2 .ln { text-shadow: 0 0 calc(var(--h) * .008) rgba(255,255,255,.9), 0 0 calc(var(--h) * .022) rgba(255,255,255,.55); }
+    #v2 #v2-count { color: ${hc.ink}; text-shadow: 0 0 calc(var(--h) * .007) rgba(255,255,255,.95), 0 0 calc(var(--h) * .018) rgba(255,255,255,.6); }
+    #v2 #v2-count.hot { color: ${hc.hot}; }
+    #v2 #v2-badge, #v2 .pill, #v2 #v2-final { background: ${hc.pill}; color: ${hc.pillText}; text-shadow: none; border-radius: 999px;
+      box-shadow: 0 calc(var(--h) * .004) calc(var(--h) * .018) rgba(20,16,12,.28); }
+    #v2 #v2-badge { color: ${hc.pillGold}; }
+    #v2 #v2-label.bonus { background: none; color: inherit; -webkit-background-clip: border-box; background-clip: border-box; filter: none; text-shadow: none; }
+    #v2 .pill { display: inline-block; color: ${hc.pillGold}; padding: calc(var(--h) * .008) calc(var(--h) * .026) calc(var(--h) * .011); line-height: 1; }
+    #v2 #v2-final { left: 50%; right: auto; width: max-content; top: ${hc.finalTop}; font-size: calc(var(--h) * ${hc.finalSize}); font-weight: 800;
+      padding: calc(var(--h) * .012) calc(var(--h) * .026); line-height: 1; }
+    #vignette { background: radial-gradient(ellipse at 50% 52%, rgba(0,0,0,0) 58%, rgba(96,78,60,.16) 100%) !important; }
   ` : '');
   document.head.appendChild(css);
   const root = document.createElement('div');
@@ -48,21 +64,23 @@ export function createHudV2(profile, recipe, tl) {
   hook.textContent = V.hook.title;
   badge.textContent = V.hook.badge;
   final.textContent = V.finale.text;
-  // shrink long lines to 92% of the frame width
-  const fit = (el) => {
+  // shrink long lines to 92% of the frame width (pad: horizontal padding of a pill around the text)
+  const fit = (el, pad = 0) => {
     const r = document.createRange(); r.selectNodeContents(el);
-    const w = r.getBoundingClientRect().width, max = profile.width * 0.92;
+    const w = r.getBoundingClientRect().width, max = profile.width * 0.92 - pad;
     if (w > max) el.style.fontSize = (parseFloat(getComputedStyle(el).fontSize) * max / w).toFixed(2) + 'px';
   };
-  [hook, final].forEach(fit);
+  const pillPad = 2 * 0.026 * profile.height;
+  fit(hook);
+  if (light) { fit(final, pillPad); fit(badge, pillPad); } else fit(final);
   const fitCache = new Map();
   const setLabel = (txt, bonus) => {
     if (label.textContent !== txt) {
-      label.textContent = txt;
+      if (light && bonus) { label.textContent = ''; const sp = document.createElement('span'); sp.className = 'pill'; sp.textContent = txt; label.appendChild(sp); } else label.textContent = txt;
       label.className = 'ln' + (bonus ? ' bonus' : '');
       label.style.fontSize = '';
       if (!fitCache.has(txt)) {
-        fit(label);
+        fit(label, light && bonus ? pillPad : 0);
         if (bonus && hc.bonusFontScale) label.style.fontSize = (parseFloat(getComputedStyle(label).fontSize) * hc.bonusFontScale).toFixed(2) + 'px'; // pop headroom inside 9:16
         fitCache.set(txt, label.style.fontSize);
       } else label.style.fontSize = fitCache.get(txt);
@@ -74,7 +92,7 @@ export function createHudV2(profile, recipe, tl) {
   return {
     update(t) {
       // hook title (also fades back in at the very end so the last frame matches frame 0)
-      const hookA = (1 - sm(hk.end - 0.05, hk.end + 0.12, t)) + sm(V.duration - 0.25, V.duration, t); // reappears only once the ingot is whole
+      const hookA = (1 - sm(hk.end - 0.05, hk.end + 0.12, t)) + sm(...(hk.loopIn ?? [V.duration - 0.25, V.duration]), t); // reappears only once the ingot is whole
       op(hook, Math.min(1, hookA)); op(badge, Math.min(1, hookA));
       const bp = 1 + 0.04 * Math.sin(t * 2 * Math.PI * 1.6) * (t < hk.end ? 1 : 0);
       badge.style.transform = `translateX(-50%) scale(${bp.toFixed(4)})`;
@@ -103,7 +121,7 @@ export function createHudV2(profile, recipe, tl) {
       // finale call to action (upper third)
       const fa = sm(fin.in, fin.in + 0.25, t) * (1 - sm(fin.out, fin.out + 0.3, t));
       op(final, fa);
-      final.style.transform = `translateY(${((1 - sm(fin.in, fin.in + 0.3, t)) * profile.height * 0.02).toFixed(2)}px)`;
+      final.style.transform = `${light ? 'translateX(-50%) ' : ''}translateY(${((1 - sm(fin.in, fin.in + 0.3, t)) * profile.height * 0.02).toFixed(2)}px)`;
       // flash: whip transition, impacts, round transitions
       let f = (hc.whipFlash ?? 0.38) * Math.max(0, 1 - Math.abs(t - (hk.end + 0.13)) / 0.17);
       for (const R of tl.rounds) {

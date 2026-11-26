@@ -172,19 +172,8 @@ diffuseColor.rgb = mix(diffuseColor.rgb, aAlb, aCapW);`)
   return mat;
 }
 
-/**
- * Intact apple: crystal glass + laser-glass seam lines (object-space planes like v2, but thin and density-faded so even the
- * 100-cut grid leaves the glass readable; the newest seam flashes gold from the inside).
- */
-export function makeAppleShellMaterial(A, o = {}, U) {
-  const mat = new THREE.MeshPhysicalMaterial(glassParams(o));
-  mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, U);
-    sh.vertexShader = sh.vertexShader
-      .replace('#include <common>', '#include <common>\nvarying vec3 vSP;')
-      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSP = position;');
-    sh.fragmentShader = sh.fragmentShader
-      .replace('#include <common>', `#include <common>
+/** Laser-glass seam GLSL (object-space planes), shared by the v3 shells (apple, watermelon). */
+export const SEAM_HEAD_GLSL = `#include <common>
 varying vec3 vSP;
 uniform vec3 uSN, uSLo, uSHi, uSRev, uSFlash, uSW, uHalf, uSCol, uSCol2, uSDir;
 uniform float uSGlow, uSFl, uSAlpha, uSYX;
@@ -197,8 +186,8 @@ vec3 seamAxis(float p, float hl, float n, float lo, float hi, float revC, float 
   float inR = step(0.5, k) * step(k, n - 0.5), full = step(k, lo - 0.5), cur = step(lo - 0.5, k) * step(k, hi - 0.5) * revC;
   float on = inR * max(full, cur), core = sCov(w, d, fw);
   return vec3(on * sCov(w * 3.0, d, fw), on * core, inR * cur * core);
-}`)
-      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+}`;
+export const SEAM_BODY_GLSL = `#include <emissivemap_fragment>
 {
   float rxz = sRv(vSP.y, uHalf.y, uSRev.x, uSDir.x);
   float rzz = sRv(vSP.y, uHalf.y, uSRev.z, uSDir.z);
@@ -209,7 +198,22 @@ vec3 seamAxis(float p, float hl, float n, float lo, float hi, float revC, float 
   float halo = max(ax.x, max(ay.x, az.x)) * uSAlpha, core = max(ax.y, max(ay.y, az.y)) * uSAlpha;
   float nw = max(ax.z * uSFlash.x, max(ay.z * uSFlash.y, az.z * uSFlash.z)) * uSAlpha;
   totalEmissiveRadiance += (uSCol2 * halo * 0.25 + uSCol * core) * uSGlow + uSCol2 * nw * uSFl;
-}`);
+}`;
+
+/**
+ * Intact apple: crystal glass + laser-glass seam lines (object-space planes like v2, but thin and density-faded so even the
+ * 100-cut grid leaves the glass readable; the newest seam flashes gold from the inside).
+ */
+export function makeAppleShellMaterial(A, o = {}, U) {
+  const mat = new THREE.MeshPhysicalMaterial(glassParams(o));
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSP;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSP = position;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', SEAM_HEAD_GLSL)
+      .replace('#include <emissivemap_fragment>', SEAM_BODY_GLSL);
   };
   mat.customProgramCacheKey = () => 'apple-shell-v3';
   return mat;

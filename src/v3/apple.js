@@ -230,7 +230,7 @@ function capTriangles(segs, n) {
  * most one edge on the next plane. x planes are processed first: skin triangles outside the cell's x slab are dropped up front.
  */
 export function clipAppleCell(tris, A, lo, hi) {
-  const ext = [A.W / 2, A.Hh, A.W / 2];
+  const ext = [A.size[0] / 2, A.size[1] / 2, A.size[2] / 2]; // apple: [W/2, Hh, W/2]; watermelon wedge: [W/2, Hh, T/2]
   let faces = [];
   for (const t of tris) {
     const xa = t[0][0], xb = t[1][0], xc = t[2][0];
@@ -312,11 +312,11 @@ const keepCache = new Map();
  * mode "center": cell centre inside the apple (micro rounds).
  */
 export function appleCellKeep(A, grid, mode = 'center', minFrac = 0.03) {
-  const key = `${A.W},${A.Hh},${grid.join('x')},${mode},${minFrac}`;
+  const key = `${A.key ?? ''}${A.W},${A.Hh},${grid.join('x')},${mode},${minFrac}`;
   if (keepCache.has(key)) return keepCache.get(key);
   const [nx, ny, nz] = grid, keep = new Uint8Array(nx * ny * nz), clips = mode === 'volume' ? [] : null;
   const [W, H, D] = A.size, cw = W / nx, ch = H / ny, cd = D / nz;
-  const tris = mode === 'volume' ? appleTriangles(A) : null;
+  const tris = mode === 'volume' ? (A.triangles ? A.triangles() : appleTriangles(A)) : null; // other v3 shapes bring their own closed skin
   let i = 0;
   for (let a = 0; a < nx; a++) for (let b = 0; b < ny; b++) for (let c = 0; c < nz; c++, i++) {
     const lo = [-W / 2 + a * cw, -H / 2 + b * ch, -D / 2 + c * cd], hi = [lo[0] + cw, lo[1] + ch, lo[2] + cd];

@@ -15,12 +15,16 @@ const hash = (n) => { const x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return
 const easeInOutCubic = (u) => (u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
 const GAP = 0.985;
 
-export async function createDebrisV3({ recipe, profile, scene, G, A, stemLeaf }) {
+/**
+ * kit (optional, v3.1 shapes other than the apple): { pieceMat, gemMesh(ep), look: {kind: [c0, c1, heat]}, kind(i, x, y, z) }.
+ * Without a kit every path below is the v3.0 apple one.
+ */
+export async function createDebrisV3({ recipe, profile, scene, G, A, stemLeaf, kit = null }) {
   await RAPIER.init();
   const [W, H, D] = A.size;
   const pal = recipe.palette, oc = recipe.object;
   const rounds = recipe.v2.rounds;
-  const pieceMat = makeApplePieceMaterial(A, { ...(oc.glass ?? {}), coreGlow: oc.coreGlow ?? 1 });
+  const pieceMat = kit ? kit.pieceMat : makeApplePieceMaterial(A, { ...(oc.glass ?? {}), coreGlow: oc.coreGlow ?? 1 });
   const shardMat = makeShardMaterial(oc.shards ?? {});
   const cap = profile.maxShards ?? 8000;
   const sgeo = shardGeometry(oc.shardSeed ?? 5);
@@ -33,7 +37,7 @@ export async function createDebrisV3({ recipe, profile, scene, G, A, stemLeaf })
   scene.add(pieceGroup);
 
   // stem / leaf: detached from the intact apple at spawn time and parented to the owning piece
-  const stem = stemLeaf.group;
+  const stem = stemLeaf ? stemLeaf.group : null;
   const pieceCache = new Map();
   const applePieces = (grid) => {
     const key = grid.join('x');
@@ -53,7 +57,7 @@ export async function createDebrisV3({ recipe, profile, scene, G, A, stemLeaf })
       pieceGroup.add(mesh);
       const hull = new Float32Array(pg.hull.length * 3);
       pg.hull.forEach((q, k) => hull.set([q[0] * GAP, q[1] * GAP, q[2] * GAP], k * 3));
-      const sb = stemLeaf.base, ownsStem = sb[0] >= lo[0] && sb[0] < hi[0] && sb[1] >= lo[1] && sb[1] < hi[1] && sb[2] >= lo[2] && sb[2] < hi[2];
+      const sb = stemLeaf ? stemLeaf.base : [Infinity, 0, 0], ownsStem = !!stemLeaf && sb[0] >= lo[0] && sb[0] < hi[0] && sb[1] >= lo[1] && sb[1] < hi[1] && sb[2] >= lo[2] && sb[2] < hi[2];
       out.push({ mesh, hull, home, ownsStem });
     }
     pieceCache.set(key, out);
@@ -62,7 +66,7 @@ export async function createDebrisV3({ recipe, profile, scene, G, A, stemLeaf })
 
   // emerald easter egg
   const ep = { size: 0.11, restY: 0.075, gradient: ['#003d1f', '#00c853', '#7dffb8'], emissive: '#00c853', emissiveIntensity: 0.45, light: '#00ff88', lightIntensity: 0.9, ...(pal.gem ?? {}) };
-  const gem = new THREE.Mesh(emeraldGeometry(ep.size, ep.gradient), new THREE.MeshPhysicalMaterial({
+  const gem = kit ? kit.gemMesh(ep) : new THREE.Mesh(emeraldGeometry(ep.size, ep.gradient), new THREE.MeshPhysicalMaterial({
     color: 0xffffff, vertexColors: true, roughness: 0.05, metalness: 0.05, clearcoat: 1, clearcoatRoughness: 0.02, ior: 2.0, specularIntensity: 1,
     emissive: ep.emissive, emissiveIntensity: ep.emissiveIntensity, envMapIntensity: 1.6, flatShading: true,
   }));
@@ -82,7 +86,9 @@ export async function createDebrisV3({ recipe, profile, scene, G, A, stemLeaf })
     gold: [new THREE.Color(pal.shardGold?.[0] ?? '#ffb703'), new THREE.Color(pal.shardGold?.[1] ?? '#fff3b0'), 0.75],
     seed: [new THREE.Color('#0b0a12'), new THREE.Color('#2a2238'), 0.0],
     leaf: [new THREE.Color('#00c853'), new THREE.Color('#00ff88'), 0.25],
+    ...(kit?.look ?? {}),
   };
+  const radiusOf = (x, y, z) => (A.radius ? A.radius(x, y, z) : appleRadius(A, x, y, z));
   const leafFrac = oc.leafShards ?? 0.025;
 
   function buildSet(R, pose, t) {
@@ -104,15 +110,19 @@ export async function createDebrisV3({ recipe, profile, scene, G, A, stemLeaf })
     if (pieces) {
       for (const p of pieces) {
         p.mesh.visible = true;
-        if (p.ownsStem) { p.mesh.add(stem); stem.position.set(-p.home[0], -p.home[1], -p.home[2]); stem.rotation.set(0, 0, 0); stem.visible = true; }
+        if (p.ownsStem && stem) { p.mesh.add(stem); stem.position.set(-p.home[0], -p.home[1], -p.home[2]); stem.rotation.set(0, 0, 0); stem.visible = true; }
       }
     } else {
       const aHeat = sgeo.attributes.aHeat;
       for (let i = 0; i < n; i++) {
         const [x, y, z] = cells[i];
         const h = hash(i * 2.71 + R.index * 5);
-        let kind = appleLayerJS(A, appleRadius(A, x, y, z), x, y, z);
-        if (kind === 'skin' && y > H * 0.18 && hash(i * 5.17 + 3) < leafFrac * 6) kind = 'leaf'; // emerald leaf shards on the shoulders
+        let kind;
+        if (kit) kind = kit.kind(i, x, y, z);
+        else {
+          kind = appleLayerJS(A, appleRadius(A, x, y, z), x, y, z);
+          if (kind === 'skin' && y > H * 0.18 && hash(i * 5.17 + 3) < leafFrac * 6) kind = 'leaf'; // emerald leaf shards on the shoulders
+        }
         const [c0, c1, heat] = look[kind];
         grains.setColorAt(i, col.copy(c0).lerp(c1, h).multiplyScalar(0.92 + 0.16 * hash(i * 3.1 + 7)));
         aHeat.setX(i, heat * (0.7 + 0.6 * hash(i * 1.3 + 2)));
@@ -138,7 +148,7 @@ export async function createDebrisV3({ recipe, profile, scene, G, A, stemLeaf })
       if (S.n === 2) { // R1: halves hop apart and roll open like a book: cut faces (gold star) turn up toward the camera
         const s = Math.sign(hx), k = R.split ?? {};
         v = [s * R.pop * (k.out ?? 0.55), R.pop * (k.up ?? 0.9), k.fwd ?? 0.25];
-        w = [k.tilt ?? 0.4, 0, -s * R.pop * (k.spin ?? 3.6)];
+        w = [k.tilt ?? 0.4, s * R.pop * (k.yaw ?? 0), -s * R.pop * (k.spin ?? 3.6)]; // yaw (v3.1): halves swing open like doors, cut faces to camera
       } else {
         const dx = hx + (rnd() - 0.5) * 0.2, dz = hz + (rnd() - 0.5) * 0.2, l = Math.hypot(dx, dz) || 1;
         const yN = (hy + H / 2) / H, s = R.pop * (0.75 + 0.5 * rnd());
@@ -167,7 +177,7 @@ export async function createDebrisV3({ recipe, profile, scene, G, A, stemLeaf })
       const r1 = hash(i * 1.1 + R.index), r2 = hash(i * 2.3 + 5), r3 = hash(i * 3.7 + 9), r4 = hash(i * 5.3 + 13);
       const ang = Math.atan2(hz + (r1 - 0.5) * 0.5, hx + (r2 - 0.5) * 0.5) + (r3 - 0.5) * 0.7;
       const radial = Math.min(1, Math.hypot(hx / (W / 2), hz / (D / 2)) / 1.41), yN = (hy + H / 2) / H;
-      const s = R.spread * (0.12 + 0.88 * Math.pow(r4, R.pile ? 1.5 : 0.85)) * (0.55 + 0.45 * radial) * (0.4 + 0.8 * Math.min(1, appleRadius(A, hx, hy, hz)));
+      const s = R.spread * (0.12 + 0.88 * Math.pow(r4, R.pile ? 1.5 : 0.85)) * (0.55 + 0.45 * radial) * (0.4 + 0.8 * Math.min(1, radiusOf(hx, hy, hz)));
       const vw = va.set(Math.cos(ang) * s, (1.2 + 5.5 * r2) * (0.4 + yN), Math.sin(ang) * s * 0.85 + 0.07 * s).applyAxisAngle(up, pose.yaw);
       S.vel.set([vw.x, vw.y, vw.z], i * 3);
       const wm = 8 + 18 * r1;
@@ -243,6 +253,10 @@ export async function createDebrisV3({ recipe, profile, scene, G, A, stemLeaf })
     const u = clamp01(tau / T), s = Ls * (1 - (1 - u) * (1 - u));
     const dir = ep.dir ?? [0.42, 0.9];
     const hop = 0.28 * Math.sin(Math.PI * clamp01(tau / 0.28)) * (tau < 0.28 ? 1 : 0);
+    if (ep.mode === 'slide') { // flat gold seed: skids out of the core spinning about y, then lies still
+      qa.setFromAxisAngle(up, Math.atan2(-dir[1], dir[0]) + (ep.spin ?? 6) * (1 - (1 - u) ** 3));
+      return { p: [dir[0] * s, ep.restY + hop, dir[1] * s], q: qa.clone() };
+    }
     qa.setFromAxisAngle(ax.set(dir[1], 0, -dir[0]), s / ep.size);
     qb.setFromAxisAngle(ax.set(1, 0, 0), Math.PI / 2 - 0.35);
     return { p: [dir[0] * s, ep.restY + hop, dir[1] * s], q: qa.clone().multiply(qb) };
@@ -269,6 +283,7 @@ export async function createDebrisV3({ recipe, profile, scene, G, A, stemLeaf })
     get active() { return !!set; },
     spawn(R, pose, t) {
       clearSet();
+      if (kit && kit.setRound) kit.setRound(R.index);
       set = buildSet(R, pose, t);
       if (R.physics === 'rapier') spawnRapier(set, pose); else spawnAnalytic(set, pose);
       if (R.ruby) { set.gem = true; gem.visible = true; }
