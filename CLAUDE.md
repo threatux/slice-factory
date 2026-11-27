@@ -16,3 +16,9 @@
 
 - Keep shaders, physics, scene, HUD, and audio timestamps cleanly separated into modules.
 - Do not install heavy UI frameworks or Remotion.
+
+## Autonomous Work Rule (strict)
+
+- Do NOT ask for confirmation on intermediate steps, technical fixes, re-runs, re-renders or retries.
+- Silently iterate until the result is green (renders complete, checks pass), then report once — only when the final deliverable file is ready.
+- Still never commit or push unless the user asked for it in the current task.

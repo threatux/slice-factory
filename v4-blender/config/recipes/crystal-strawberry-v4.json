@@ -1,0 +1,950 @@
+{
+  "id": "crystal-strawberry-v4",
+  "title": "Crystal Glass Strawberry",
+  "scale_note": "Hero scale: 1 BU ~ 3 cm real. Keeps Bullet stable and makes f/2.8 @ 85mm give a readable DOF.",
+  "fruit": {
+    "type": "crystal-strawberry",
+    "height": 1.45,
+    "max_radius": 0.62,
+    "segments": [
+      224,
+      144
+    ],
+    "taper_exp": 0.62,
+    "shoulder_exp": 5.0,
+    "shoulder_soft": 0.42,
+    "tip_flat": 0.035,
+    "lobes": {
+      "count": 5,
+      "amp": 0.018,
+      "twist": 0.6
+    },
+    "seeds": {
+      "count": 170,
+      "band": [
+        0.07,
+        0.86
+      ],
+      "length": 0.05,
+      "width": 0.021,
+      "pit_radius": 0.05,
+      "pit_depth": 0.011,
+      "flush_depth": 1.0,
+      "rng": 7
+    },
+    "gold_seeds": [
+      {
+        "pos": [
+          0.0,
+          -0.08,
+          0.6
+        ],
+        "size": [
+          0.075,
+          0.075,
+          0.12
+        ],
+        "reveal": true
+      },
+      {
+        "pos": [
+          0.22,
+          0.12,
+          0.38
+        ],
+        "size": [
+          0.06,
+          0.06,
+          0.1
+        ]
+      },
+      {
+        "pos": [
+          -0.2,
+          0.18,
+          0.92
+        ],
+        "size": [
+          0.06,
+          0.06,
+          0.1
+        ]
+      }
+    ],
+    "crown": {
+      "leaves": 7,
+      "length": 0.6,
+      "width": 0.2,
+      "thickness": 0.022,
+      "droop": 0.55,
+      "curl": 0.12,
+      "clearance": 0.035,
+      "rng": 3,
+      "stem": {
+        "length": 0.34,
+        "radius": 0.042,
+        "bend": 0.09
+      }
+    }
+  },
+  "materials": {
+    "crystal_glass": {
+      "color": "#ff1744",
+      "base_tint": "#fff0f2",
+      "ior": 1.5,
+      "roughness": 0.04,
+      "coat": 1.0,
+      "absorption_density": 5.5,
+      "shadow_tint": "#ff5c7a",
+      "shard_tint": "#ff5a78",
+      "shard_density": 40.0
+    },
+    "core": {
+      "glass_tint": "#ffc4cf",
+      "milk": "#ffe4e8",
+      "rays": 22,
+      "ray_sharpness": 4.0,
+      "pith_radius": 0.085,
+      "absorption_density": 5.5,
+      "edge_tint": "#ff7d95",
+      "edge_from": 0.22,
+      "ray_strength": 0.35,
+      "pith_strength": 0.3,
+      "milk_transmission": 0.6
+    },
+    "leaves": {
+      "color": "#0fa958",
+      "base_tint": "#8ff0b8",
+      "shadow_tint": "#6fe8a4",
+      "roughness": 0.08,
+      "subsurface": 0.12,
+      "absorption_density": 1.2
+    },
+    "seeds": {
+      "color": "#ffb52e",
+      "roughness": 0.05,
+      "transmission": 0.9
+    },
+    "emerald_shard": {
+      "color": "#0fa958",
+      "shard_tint": "#35d98a",
+      "shadow_tint": "#6fe8a4",
+      "ior": 1.52,
+      "roughness": 0.04,
+      "coat": 1.0,
+      "shard_density": 30.0
+    },
+    "cut_line": {
+      "color": "#fff1f3",
+      "glow": 0.9,
+      "alpha": 0.5
+    },
+    "gold": {
+      "color": "#ffc400",
+      "roughness": 0.12,
+      "emission_color": "#ffb300",
+      "emission": 0.42
+    },
+    "damascus": {
+      "color": "#1f242c",
+      "light": "#343b46",
+      "wave_scale": 16.0,
+      "noise_scale": 5.6,
+      "distortion": 5.0,
+      "roughness": [
+        0.34,
+        0.52
+      ],
+      "bump": 0.025,
+      "edge_roughness": 0.04
+    },
+    "steel": {
+      "color": "#c9ccd1",
+      "roughness": 0.12
+    },
+    "handle": {
+      "color": "#2b1b13",
+      "grain": "#4a2f20"
+    }
+  },
+  "knife": {
+    "blade_length": 4.6,
+    "blade_height": 1.25,
+    "spine_thickness": 0.05,
+    "edge_bevel": 0.12,
+    "handle_length": 2.2,
+    "segments": [
+      96,
+      14
+    ]
+  },
+  "studio": {
+    "preset": "bright-marble",
+    "board": {
+      "size": [
+        26.0,
+        17.0,
+        0.45
+      ],
+      "bevel": 0.07,
+      "base": "#f3eee6",
+      "vein": "#b8ab9c",
+      "roughness": [
+        0.15,
+        0.32
+      ]
+    },
+    "cyclorama": {
+      "color": "#f1e4d3",
+      "radius": 7.0,
+      "floor_z": -0.45,
+      "back_y": 18.0
+    },
+    "world": {
+      "color": "#f4e7d8",
+      "strength": 0.35
+    },
+    "lights": {
+      "key": {
+        "pos": [
+          -4.2,
+          2.6,
+          5.4
+        ],
+        "size": [
+          2.4,
+          2.4
+        ],
+        "power": 900,
+        "color": "#ffe2c2",
+        "caustics": true
+      },
+      "fill": {
+        "pos": [
+          5.5,
+          -6.0,
+          3.0
+        ],
+        "size": [
+          6.0,
+          4.0
+        ],
+        "power": 650,
+        "color": "#fff5ec"
+      },
+      "rim": {
+        "pos": [
+          3.2,
+          5.5,
+          2.6
+        ],
+        "size": [
+          2.8,
+          0.5
+        ],
+        "power": 1100,
+        "color": "#f2f6ff"
+      }
+    },
+    "exposure": 0.0
+  },
+  "camera": {
+    "lens": 85,
+    "sensor": 36,
+    "fstop": 2.8,
+    "shutter": 0.35
+  },
+  "cut": {
+    "plane_co": [
+      0,
+      0,
+      0
+    ],
+    "plane_no": [
+      1,
+      0,
+      0
+    ],
+    "bevel": 0.006,
+    "gap": 0.004,
+    "tilt_deg": 2.5
+  },
+  "physics": {
+    "frames": 45,
+    "gravity": -28.0,
+    "friction": 0.95,
+    "restitution": 0.15,
+    "margin": 0.003,
+    "substeps": 20,
+    "iterations": 30,
+    "damping": [
+      0.25,
+      0.9
+    ]
+  },
+  "shots": {
+    "hero": {
+      "camera": {
+        "pos": [
+          0.0,
+          -8.0,
+          2.9
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.72
+        ]
+      },
+      "frame": 1
+    },
+    "blade": {
+      "camera": {
+        "pos": [
+          6.4,
+          -8.6,
+          3.9
+        ],
+        "target": [
+          0.0,
+          0.2,
+          1.05
+        ]
+      },
+      "knife_edge_z": 0.98,
+      "frame": 1
+    },
+    "split": {
+      "camera": {
+        "pos": [
+          0.0,
+          -9.0,
+          8.0
+        ],
+        "target": "auto",
+        "fit": 0.85
+      },
+      "frame": 45
+    },
+    "shards": {
+      "camera": {
+        "pos": [
+          0.0,
+          -9.0,
+          4.4
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.35
+        ]
+      },
+      "frame": 1
+    }
+  },
+  "shards": {
+    "count": 2000,
+    "variants": 6,
+    "size": 0.085,
+    "mound_radius": 1.7,
+    "mound_height": 0.7,
+    "rng": 11
+  },
+  "bench": {
+    "frames": [
+      36,
+      45
+    ],
+    "configs": [
+      "draft",
+      "prod-fast",
+      "prod-native"
+    ],
+    "warmup_frames": 1,
+    "project_frames": 600,
+    "project_fps": 30
+  },
+  "timeline": {
+    "duration": 20.0,
+    "center": [
+      0.0,
+      0.0,
+      0.7
+    ],
+    "rewind": 0.25,
+    "sim": {
+      "sim_fps": 30,
+      "substeps": 10,
+      "iterations": 20,
+      "gravity": -28.0,
+      "friction": 0.85,
+      "restitution": 0.2,
+      "margin": 0.002,
+      "damping": [
+        0.15,
+        0.6
+      ],
+      "seed": 20251127,
+      "deactivation": [
+        0.35,
+        0.6
+      ]
+    },
+    "knife": {
+      "park_z": 14.0,
+      "top_z": 1.98,
+      "floor_z": 0.004,
+      "edge_u": 0.32,
+      "entry": 0.05,
+      "exit": 0.2
+    },
+    "cut_line": {
+      "radius": 0.00275,
+      "sides": 6
+    },
+    "rounds": [
+      {
+        "id": "R1",
+        "label": "1 Cut",
+        "t0": 0.0,
+        "t1": 3.2,
+        "cut_start": 0.05,
+        "pass": 0.2,
+        "gap": 0.0,
+        "planes": [
+          {
+            "co": [
+              0,
+              0,
+              0
+            ],
+            "no": [
+              0.906,
+              0.423,
+              0
+            ],
+            "sweep": "down"
+          }
+        ],
+        "split": {
+          "tilt_deg": 2.5,
+          "gap": 0.004
+        },
+        "tier": 1,
+        "fit": 0.78,
+        "cam_dir": [
+          0.0,
+          -9.0,
+          8.0
+        ],
+        "gold": [
+          {
+            "pos": [
+              -0.02,
+              -0.025,
+              0.62
+            ],
+            "size": [
+              0.05,
+              0.05,
+              0.085
+            ]
+          }
+        ],
+        "view": {
+          "zoom": 0.72,
+          "gold_size": [
+            0.1,
+            0.1,
+            0.17
+          ],
+          "gold_piece": 0,
+          "gold_proud": 0.65,
+          "gold_bias": 0.5
+        }
+      },
+      {
+        "id": "R2",
+        "label": "3 Cuts",
+        "t0": 3.2,
+        "t1": 6.4,
+        "cut_start": 3.5,
+        "pass": 0.16,
+        "gap": 0.05,
+        "planes": [
+          {
+            "co": [
+              0,
+              0,
+              0
+            ],
+            "no": [
+              0.866,
+              0.5,
+              0
+            ],
+            "sweep": "down"
+          },
+          {
+            "co": [
+              0,
+              0,
+              0
+            ],
+            "no": [
+              -0.5,
+              0.866,
+              0
+            ],
+            "sweep": "down"
+          },
+          {
+            "co": [
+              0,
+              0,
+              0.72
+            ],
+            "no": [
+              0,
+              0,
+              1
+            ],
+            "sweep": "x"
+          }
+        ],
+        "force": {
+          "strength": 9.0,
+          "frames": 3,
+          "radius": 1.6
+        },
+        "tier": 2,
+        "fit": 0.8,
+        "cam_dir": [
+          0.0,
+          -9.0,
+          8.5
+        ],
+        "gold": [
+          {
+            "pos": [
+              0.099,
+              -0.23,
+              0.45
+            ],
+            "size": [
+              0.05,
+              0.05,
+              0.085
+            ]
+          }
+        ],
+        "view": {
+          "zoom": 0.62,
+          "gold_size": [
+            0.1,
+            0.1,
+            0.17
+          ],
+          "gold_proud": 0.65,
+          "gold_bias": 0.5
+        }
+      },
+      {
+        "id": "R3",
+        "label": "9 Cuts",
+        "t0": 6.4,
+        "t1": 10.0,
+        "cut_start": 6.7,
+        "pass": 0.11,
+        "gap": 0.025,
+        "planes": [
+          {
+            "co": [
+              0,
+              0,
+              0
+            ],
+            "no": [
+              1,
+              0,
+              0
+            ],
+            "sweep": "down"
+          },
+          {
+            "co": [
+              0,
+              0,
+              0
+            ],
+            "no": [
+              0.5,
+              0.866,
+              0
+            ],
+            "sweep": "down"
+          },
+          {
+            "co": [
+              0,
+              0,
+              0
+            ],
+            "no": [
+              -0.5,
+              0.866,
+              0
+            ],
+            "sweep": "down"
+          },
+          {
+            "co": [
+              0,
+              0,
+              0.55
+            ],
+            "no": [
+              0,
+              0,
+              1
+            ],
+            "sweep": "x"
+          },
+          {
+            "co": [
+              0,
+              0,
+              1.05
+            ],
+            "no": [
+              0,
+              0,
+              1
+            ],
+            "sweep": "y"
+          },
+          {
+            "co": [
+              0.5,
+              0,
+              0
+            ],
+            "no": [
+              1,
+              0,
+              0
+            ],
+            "sweep": "down"
+          },
+          {
+            "co": [
+              -0.5,
+              0,
+              0
+            ],
+            "no": [
+              1,
+              0,
+              0
+            ],
+            "sweep": "down"
+          },
+          {
+            "co": [
+              0,
+              0.5,
+              0
+            ],
+            "no": [
+              0,
+              1,
+              0
+            ],
+            "sweep": "down"
+          },
+          {
+            "co": [
+              0,
+              -0.5,
+              0
+            ],
+            "no": [
+              0,
+              1,
+              0
+            ],
+            "sweep": "down"
+          }
+        ],
+        "force": {
+          "strength": 14.0,
+          "frames": 3,
+          "radius": 1.8
+        },
+        "tier": 2,
+        "fit": 0.82,
+        "cam_dir": [
+          0.0,
+          -8.5,
+          9.0
+        ],
+        "gold": [
+          {
+            "pos": [
+              0.06,
+              -0.27,
+              0.8
+            ],
+            "size": [
+              0.05,
+              0.05,
+              0.085
+            ]
+          }
+        ],
+        "view": {
+          "zoom": 0.66,
+          "gold_size": [
+            0.1,
+            0.1,
+            0.17
+          ],
+          "gold_proud": 0.65,
+          "gold_bias": 0.5
+        }
+      },
+      {
+        "id": "R4",
+        "label": "36 Cuts",
+        "t0": 10.0,
+        "t1": 13.8,
+        "cut_start": 10.3,
+        "pass": 0.055,
+        "gap": 0.006,
+        "blitz": [
+          {
+            "type": "vertical",
+            "count": 12,
+            "angle": 20.0,
+            "extent": 0.56
+          },
+          {
+            "type": "horizontal",
+            "count": 12,
+            "extent": 0.62
+          },
+          {
+            "type": "diagonal",
+            "count": 12,
+            "angle": -35.0,
+            "extent": 0.78
+          }
+        ],
+        "shatter": {
+          "count": 420,
+          "emerald": 0.05,
+          "variants": [
+            8,
+            3
+          ],
+          "force": {
+            "strength": 3.0,
+            "frames": 2,
+            "radius": 1.6
+          }
+        },
+        "tier": 3,
+        "fit": 0.85,
+        "cam_dir": [
+          0.0,
+          -8.5,
+          7.0
+        ],
+        "gold": []
+      },
+      {
+        "id": "R5",
+        "label": "BONUS: 100 Cuts",
+        "t0": 13.8,
+        "t1": 20.0,
+        "cut_start": 14.1,
+        "pass": 0.02,
+        "gap": 0.002,
+        "blitz": [
+          {
+            "type": "vertical",
+            "count": 34,
+            "angle": -15.0,
+            "extent": 0.58
+          },
+          {
+            "type": "horizontal",
+            "count": 33,
+            "extent": 0.64
+          },
+          {
+            "type": "diagonal",
+            "count": 33,
+            "angle": 40.0,
+            "extent": 0.8
+          }
+        ],
+        "shatter": {
+          "count": 2100,
+          "emerald": 0.05,
+          "variants": [
+            10,
+            4
+          ],
+          "force": {
+            "strength": 2.5,
+            "frames": 3,
+            "radius": 2.0
+          },
+          "gold": {
+            "pos": [
+              0.05,
+              -0.42,
+              0.14
+            ],
+            "size": [
+              0.032,
+              0.032,
+              0.055
+            ]
+          }
+        },
+        "tier": 4,
+        "fit": 0.8,
+        "cam_dir": [
+          0.0,
+          -8.0,
+          6.0
+        ],
+        "drift": {
+          "t0": 17.3,
+          "t1": 19.1,
+          "orbit_deg": 9.0,
+          "dolly": 0.88
+        },
+        "shimmer": [
+          18.2,
+          19.1
+        ],
+        "loop_rewind": [
+          19.1,
+          20.0
+        ],
+        "gold": [],
+        "view": {
+          "gold_scale": 2.2,
+          "gold_on_top": {
+            "front": 0.14,
+            "settle": 0.55
+          },
+          "drift": {
+            "t0": 17.3,
+            "t1": 18.6,
+            "orbit_deg": 9.0,
+            "dolly": 0.88
+          },
+          "shimmer": [
+            18.1,
+            18.9
+          ],
+          "loop_rewind": [
+            18.9,
+            19.75
+          ],
+          "rewind_ease": "out"
+        }
+      }
+    ],
+    "view_note": "Per-round 'view' blocks are visual-only overrides (camera zoom, gold placement, loop timing). They are excluded from the Bullet cache key, so baked R1-R5 trajectories stay valid."
+  },
+  "hud": {
+    "hook": {
+      "title": "1 Cut vs 100 Cuts",
+      "badge": "Count the GOLD seeds 🟡",
+      "show": [
+        [
+          0.0,
+          1.25
+        ],
+        [
+          19.45,
+          20.0
+        ]
+      ]
+    },
+    "labels": [
+      {
+        "text": "1 Cut",
+        "t": [
+          1.25,
+          3.2
+        ]
+      },
+      {
+        "text": "3 Cuts",
+        "t": [
+          3.2,
+          6.4
+        ]
+      },
+      {
+        "text": "9 Cuts",
+        "t": [
+          6.4,
+          10.0
+        ]
+      },
+      {
+        "text": "36 Cuts",
+        "t": [
+          10.0,
+          13.8
+        ]
+      },
+      {
+        "text": "BONUS: 100 Cuts",
+        "t": [
+          13.8,
+          17.4
+        ],
+        "bonus": true
+      }
+    ],
+    "final": {
+      "text": "How many GOLD seeds? 👇",
+      "t": [
+        17.4,
+        19.45
+      ]
+    },
+    "style": {
+      "ink": "#14171c",
+      "pill": [
+        18,
+        20,
+        26,
+        224
+      ],
+      "pill_text": "#ffffff",
+      "pill_gold": "#ffd54a",
+      "label_top": 0.085,
+      "label_size": 0.064,
+      "hook_top": 0.08,
+      "hook_size": 0.07,
+      "badge_top": 0.162,
+      "badge_size": 0.03,
+      "final_top": 0.22,
+      "final_size": 0.04,
+      "fade": 0.12
+    }
+  },
+  "audio": {
+    "profile": "slizzy_juicy_glass",
+    "seed": 7
+  }
+}

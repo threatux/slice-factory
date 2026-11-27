@@ -1,0 +1,77 @@
+{
+  "lookdev": {
+    "resolution": [
+      1080,
+      1920
+    ],
+    "fps": 30,
+    "samples": 128,
+    "adaptive_threshold": 0.01,
+    "adaptive_min_samples": 0
+  },
+  "draft": {
+    "resolution": [
+      540,
+      960
+    ],
+    "fps": 15,
+    "samples": 12,
+    "adaptive_threshold": 0.06,
+    "adaptive_min_samples": 0,
+    "transmission_bounces": 4,
+    "output_resolution": [
+      540,
+      960
+    ]
+  },
+  "prod-fast": {
+    "resolution": [
+      720,
+      1280
+    ],
+    "fps": 30,
+    "samples": 24,
+    "adaptive_threshold": 0.03,
+    "adaptive_min_samples": 0,
+    "transmission_bounces": 4,
+    "output_resolution": [
+      1080,
+      1920
+    ],
+    "upscale": "lanczos"
+  },
+  "prod-native": {
+    "resolution": [
+      1080,
+      1920
+    ],
+    "fps": 30,
+    "samples": 32,
+    "adaptive_threshold": 0.025,
+    "adaptive_min_samples": 0,
+    "transmission_bounces": 6,
+    "output_resolution": [
+      1080,
+      1920
+    ]
+  },
+  "bounces": {
+    "max_bounces": 6,
+    "diffuse_bounces": 2,
+    "glossy_bounces": 4,
+    "transmission_bounces": 6,
+    "transparent_max_bounces": 6,
+    "volume_bounces": 0
+  },
+  "shadow_caustics_mnee": false,
+  "clamp_indirect": 8.0,
+  "filter_glossy": 0.5,
+  "view_transform": "AgX",
+  "look": "Punchy",
+  "caustics_reflective": false,
+  "caustics_refractive": false,
+  "motion_blur": {
+    "mode": "vector",
+    "samples": 64
+  }
+}
