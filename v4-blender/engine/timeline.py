@@ -117,6 +117,8 @@ def _view(rd, key, default=None):
 
 
 def _inside(prof, p, shrink=0.93):
+    if hasattr(prof, "inside"):  # non-revolution shapes (crystal rubik's cube) bring their own test
+        return prof.inside(p, shrink)
     h_z = p.z
     if h_z <= 0.01 or h_z >= prof.z(1.0) - 0.02:
         return False
@@ -146,6 +148,9 @@ class Timeline:
         self.knife_keys = []  # (t, edge_point Vector, rotation Matrix3)
         self.cam_keys = []  # (t, pos, target)
         self.stats = {}
+        Timeline._core = mats["_cap_to"].name if "_cap_to" in mats else "StrawberryCore"
+        self.gold_shape = recipe["fruit"].get("gold_shape", "teardrop")
+        self._intact_m = {}
         self.root = _collection("V4")
         self.intact_col = _collection("Intact", self.root)
         _move_to(berry["object"], self.intact_col)
@@ -180,6 +185,8 @@ class Timeline:
                 bodies, extra = self._slice(rd, planes, col)
             _t1 = _time.perf_counter()
             data = self._simulate(rd, ri, bodies, release, sim_dur)
+            if _view(rd, "open_blend") and self._intact_m:
+                data = self._blend_open(data, bodies, _view(rd, "open_blend"))
             if _view(rd, "gold_on_top"):
                 self._gold_on_top(rd, bodies, data)
             _t2 = _time.perf_counter()
@@ -286,7 +293,9 @@ class Timeline:
             # order halves by side of the plane (negative first)
             if (a.location - Vector(pl["co"])).dot(n) > 0:
                 a, b = b, a
-            cutter.pose_apart((a, b), list(n), rd["split"]["gap"], rd["split"]["tilt_deg"])
+            self._intact_m = {p.name: p.matrix_world.copy() for p in (a, b)}
+            cutter.pose_apart((a, b), list(n), rd["split"]["gap"], rd["split"]["tilt_deg"],
+                              rd["split"].get("pivot", "inner"))
             pieces = [a, b]
         else:
             c = Vector(self.tl["center"])
@@ -312,6 +321,8 @@ class Timeline:
         rng = random.Random(self.tl["sim"]["seed"] + len(rd["id"]) * 7 + target)
         rng.shuffle(pts)
         pts = sorted(pts[:target], key=lambda p: (round(p.z, 4), round(p.x, 4), round(p.y, 4)))
+        if "_shard_palette" in self.mats:
+            return self._shatter_palette(rd, col, pts, rng, s)
         nr, ne = sh["variants"]
         size = s * 0.42
         ruby = geometry.shard_meshes(f"{rd['id']}_ruby", nr, size, rng)
@@ -343,6 +354,46 @@ class Timeline:
             bodies.append(ob)
         bpy.context.view_layer.update()
         return bodies, {"shards": len(bodies), "emerald": n_em, "spacing": round(s, 4), "gold_in_pile": gold_i is not None}
+
+    def _shatter_palette(self, rd, col, pts, rng, s):
+        """Multi-colour shatter (crystal rubik's cube): exact per-material counts from mats['_shard_palette']
+        (6 jewel colours in equal shares + dark obsidian frame chips), randomly interleaved through the volume."""
+        sh = rd["shatter"]
+        target = len(pts)
+        nv_glass, nv_obs = sh["variants"]
+        size = s * 0.42
+        pal = self.mats["_shard_palette"]
+        meshes = []
+        for mat, _, kind in pal:
+            ms = geometry.shard_meshes(f"{rd['id']}_{mat.name}_", nv_obs if kind == "obsidian" else nv_glass, size, rng)
+            for m in ms:
+                m.materials.append(mat)
+            meshes.append(ms)
+        counts = [int(round(target * w)) for _, w, _ in pal]
+        counts[0] += target - sum(counts)
+        labels = [k for k, c in enumerate(counts) for _ in range(c)]
+        rng.shuffle(labels)
+        gold_i = None
+        if sh.get("gold"):
+            gp = Vector(sh["gold"]["pos"])
+            gold_i = min(range(len(pts)), key=lambda i: (pts[i] - gp).length)
+        bodies = []
+        for i, p in enumerate(pts):
+            if i == gold_i:
+                ob = geometry.build_gold(f"{rd['id']}_gold", sh["gold"]["size"], self.mats, col, tuple(p),
+                                         shape=self.gold_shape)
+            else:
+                ms = meshes[labels[i]]
+                ob = bpy.data.objects.new(f"{rd['id']}_s{i:04d}", ms[rng.randrange(len(ms))])
+                col.objects.link(ob)
+                ob.location = p
+            ob.rotation_mode = "QUATERNION"
+            q = Quaternion((rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1))).normalized()
+            ob.rotation_quaternion = q
+            bodies.append(ob)
+        bpy.context.view_layer.update()
+        return bodies, {"shards": len(bodies), "palette": {m.name: c for (m, _, _), c in zip(pal, counts)},
+                        "spacing": round(s, 4), "gold_in_pile": gold_i is not None}
 
     def _grid_points(self, prof, s):
         c = self.tl["center"]
@@ -411,6 +462,25 @@ class Timeline:
             return None
         return order
 
+    def _blend_open(self, data, bodies, n_frames):
+        """Visual-only: the first n sim frames ease from the intact (pre-tilt) pose into the simulated topple, so the
+        split halves open from the closed cube instead of popping to their initial tilt. Frame 0 becomes the intact
+        pose, which is also where the rewind lands (no pop when the whole cube reappears)."""
+        loc, quat = data["loc"].copy(), data["quat"].copy()
+        N = max(1, min(int(n_frames), loc.shape[1] - 1))
+        for i, ob in enumerate(bodies):
+            m = self._intact_m.get(ob.name)
+            if m is None:
+                continue
+            l0, q0, _ = m.decompose()
+            for k in range(N):
+                s = smoothstep(k / N)
+                loc[i, k] = [l0[j] * (1 - s) + loc[i, k, j] * s for j in range(3)]
+                q = q0.slerp(Quaternion(quat[i, k]), s)
+                quat[i, k] = (q.w, q.x, q.y, q.z)
+        self.stats["open_blend_frames"] = N
+        return dict(data, loc=loc, quat=quat)
+
     def _key_pieces(self, bodies, data, release, hold_until, rew, ease="smooth"):
         sim_fps = self.tl["sim"]["sim_fps"]
         loc, quat = data["loc"], data["quat"]
@@ -461,12 +531,14 @@ class Timeline:
                 keep_q.append(q)
             key_transform(ob, [self.f(t) for t in keep_t], keep_l, keep_q, interp="LINEAR")
 
+    _core = "StrawberryCore"
+
     @staticmethod
     def _caps(ob):
         """Planar cut faces of a piece (StrawberryCore polys clustered by normal), mesh-local.
         Returns [(normal, area, point_on_cap, clearance, long_axis)]."""
         me = ob.data
-        core = {i for i, m in enumerate(me.materials) if m is not None and m.name.startswith("StrawberryCore")}
+        core = {i for i, m in enumerate(me.materials) if m is not None and m.name.startswith(Timeline._core)}
         clusters = []
         for poly in me.polygons:
             if poly.material_index not in core or poly.area < 1e-9:
@@ -593,13 +665,13 @@ class Timeline:
             used.add(i)
             host = bodies[i]
             gcol = _collection(f"{rd['id']}_gold_intact", self.root)
-            gi_ob = geometry.build_gold(f"{rd['id']}_gold{gi}_intact", size, self.mats, gcol)
+            gi_ob = geometry.build_gold(f"{rd['id']}_gold{gi}_intact", size, self.mats, gcol, shape=self.gold_shape)
             gi_ob.matrix_basis = m0[i] @ L
             win = [intact_window]
             self.vis.append((gcol, win))
             if ri == 0:
                 self.first_gold_win = win  # extended with the loop hold at the end of build()
-            ob = geometry.build_gold(f"{rd['id']}_gold{gi}", size, self.mats, col)
+            ob = geometry.build_gold(f"{rd['id']}_gold{gi}", size, self.mats, col, shape=self.gold_shape)
             ob.matrix_basis = m0[i] @ L
             ob.parent = host
             ob.matrix_parent_inverse = m0[i].inverted()

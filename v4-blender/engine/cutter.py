@@ -169,12 +169,18 @@ def cut(obj, plane_co, plane_no, mats, bevel, proud_gold=0.003):
     return a, b, {"cap_faces": [caps_a, caps_b], "gold_cut_in": revealed}
 
 
-def pose_apart(halves, plane_no, gap, tilt_deg):
-    """Nudge halves off the cut plane and tilt them outward about their bottom contact."""
+def pose_apart(halves, plane_no, gap, tilt_deg, pivot_mode="inner"):
+    """Nudge halves off the cut plane and tilt them outward about their bottom contact.
+    pivot_mode 'outer': tilt about the outer bottom edge (flat-bottomed solids: no board penetration at large tilt)."""
     n = Vector(plane_no).normalized()
     for ob, sign in zip(halves, (-1, 1)):
         d = n * sign
-        pivot = Vector((0, 0, 0)) + d * gap
+        if pivot_mode == "outer":
+            mw = ob.matrix_world
+            ext = max((mw @ v.co).dot(d) for v in ob.data.vertices)
+            pivot = Vector((0, 0, 0)) + d * (ext + gap)
+        else:
+            pivot = Vector((0, 0, 0)) + d * gap
         axis = Vector((0, 0, 1)).cross(d).normalized()
         R = Matrix.Translation(pivot) @ Matrix.Rotation(math.radians(tilt_deg), 4, axis) @ Matrix.Translation(-pivot)
         lift = Matrix.Translation((0, 0, 0.004))  # start just above the board, no initial penetration
@@ -284,14 +290,23 @@ def _signed_range(ob, co, no):
     return float(d.min()), float(d.max())
 
 
+def cap_map(obj, mats):
+    """{surface slot: cap slot}. Strawberry: CrystalGlass -> StrawberryCore. Other shapes publish
+    mats['_cap_from'] (every surface material) and mats['_cap_to'] (their core style)."""
+    slots = [m.name for m in obj.data.materials]
+    if "_cap_from" in mats:
+        to = slots.index(mats["_cap_to"].name)
+        return {slots.index(m.name): to for m in mats["_cap_from"] if m.name in slots}
+    return {slots.index(mats["CrystalGlass"].name): slots.index(mats["StrawberryCore"].name)}
+
+
 def slice_planes(obj, planes, mats, bevel, min_size=0.06, name="Piece"):
     """Cut obj by every plane in order; each piece is re-capped watertight (StrawberryCore on glass).
 
     planes: [(co, no), ...] in world space. Returns pieces sorted by a stable key (deterministic order).
     The source object is left untouched (caller hides it).
     """
-    slots = [m.name for m in obj.data.materials]
-    mat_map = {slots.index(mats["CrystalGlass"].name): slots.index(mats["StrawberryCore"].name)}
+    mat_map = cap_map(obj, mats)
     work = obj.copy()
     work.data = obj.data.copy()
     obj.users_collection[0].objects.link(work)

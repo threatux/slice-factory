@@ -41,6 +41,11 @@ Uses the live samples public/audio/{chop,crackle,whoosh}.wav (soft synthesis onl
     marble cascade in R4-R5 (crackle.wav grains through a narrow resonant RBJ band-pass 3.2-7.5 kHz = glass beads pinging on
     stone, no oscillator). CITRUS draws random numbers only inside its own branches: slizzy_juicy_glass / slizzy_glass and every
     earlier profile render bit-identically.
+  * "v4_crystal_cube" (v4 Crystal Glass Rubik's Cube): the full slizzy_juicy_glass voice set (JUICY = GLASS = True) plus
+    CUBE-only layers: a denser, sharper glass-crystal click on every knife contact and fracture (two stacked high glass nicks
+    + a short bright chop.wav snap 1.55-1.75x, HP 1.8 kHz), crisp faceted-chunk clinks R1-R3, and a ringing marble scatter in
+    R4-R5 (resonant crackle.wav pings, no oscillator) over the juicy cascade. CUBE draws random numbers only inside its own
+    branches: every earlier profile renders bit-identically.
   * --audio-profile (recipe.audioProfile): "obsidian" (default, unchanged) | "metal_crystal" (gold bar / emerald core):
     R1-R2 heavy chop.wav (pitch 0.96-1.08, 120-260 Hz body accent) + dry emerald chip from crackle.wav (15-28 ms, HP 2.4 kHz, -8 dB);
     dense runs crossfade into HP 2.4 kHz crystal crumb (no synthetic sines anywhere); pour R4 pitch 0.98-1.10, R5 pitch 1.22-1.40 + 5-9 kHz accent;
@@ -69,6 +74,7 @@ NUC = False  # True for 'slizzy_nuclear' (uranium fuel rod: titanium knock + Gei
 GLASS = False  # True for 'slizzy_glass' (v3 crystal glass apple: crystal whistle + glass shatter)
 JUICY = False  # True for 'slizzy_juicy_glass' (v3.1 crystal watermelon: slizzy_glass + juicy crunch + marble sparkle); implies GLASS
 CITRUS = False  # True for 'slizzy_citrus_glass' (v3.2 crystal orange: slizzy_juicy_glass + zest crackle + ringing marble cascade); implies JUICY
+CUBE = False  # True for 'v4_crystal_cube' (v4 crystal rubik's cube: slizzy_juicy_glass + dense crystal click + ringing marble scatter); implies JUICY
 
 
 class Mix:
@@ -656,12 +662,24 @@ def glass_shower(mix, rnd, t, length, rate, gain, spread=0.85):
         tau += rnd.expovariate(rate * (0.3 + 0.7 * env))
 
 
+def cube_click(mix, rnd, t, gain, pan=0.0):
+    """v4_crystal_cube: dense crisp glass-crystal click: two stacked high glass nicks + a short bright snap."""
+    mix.add(t, glass_nick(rnd, 0.01, (1.5, 1.75)), 0.55 * gain, pan)
+    mix.add(t + 0.0035, glass_nick(rnd, 0.008, (1.7, 1.95)), 0.35 * gain, -pan * 0.6)
+    if BANK.get('chop'):
+        mix.add(t + 0.001, biquad(fade_out(play(BANK['chop'], rnd.uniform(1.55, 1.75), 0.0, 0.035), 0.02), 'hp', 1800.0),
+                0.4 * gain, pan * 0.5)
+    STATS['cube_click'] = STATS.get('cube_click', 0) + 1
+
+
 def glass_slash(mix, t, inten, rnd):
     mix.add(t - 0.09, crystal_whistle(rnd, rnd.uniform(1.0, 1.12), 0.32), 0.6 * inten, rnd.uniform(-0.3, 0.3))
     mix.add(t, glass_nick(rnd), 0.5 * inten, rnd.uniform(-0.2, 0.2))
     mix.add(t + 0.009, glass_nick(rnd, 0.012), 0.26 * inten, rnd.uniform(-0.4, 0.4))
     if CITRUS:  # the knife bites through the zest: short sparkling crackle
         citrus_zest(mix, rnd, t + 0.003, 0.07, 0.24 * inten, 500.0)
+    if CUBE:  # the blade meets a faceted crystal block: sharp dense click
+        cube_click(mix, rnd, t + 0.002, 0.8 * inten, rnd.uniform(-0.2, 0.2))
     STATS['v2_slash'] = STATS.get('v2_slash', 0) + 1
 
 
@@ -689,6 +707,8 @@ def glass_blitz(mix, t, inten, idx, n, dur, rnd):
     mix.add(t + 0.015, glass_grain(rnd, 0.004, 0.008, (1.4, 1.8)), 0.2 * inten, rnd.uniform(-0.6, 0.6))
     if CITRUS:  # crisp peel snap on contact
         citrus_zest(mix, rnd, t + 0.002, min(0.03, dur * 0.4), 0.22 * inten, 600.0)
+    if CUBE:
+        cube_click(mix, rnd, t + 0.001, (0.42 + 0.1 * k) * inten, pan * 0.8)
     STATS['v2_blitz'] = STATS.get('v2_blitz', 0) + 1
 
 
@@ -793,6 +813,9 @@ def glass_impact(mix, t, tier, rnd, boost):
         if CITRUS:  # crystal orange: sparkling zest crackle over the crunch + a short juice-mist spritz
             citrus_zest(mix, rnd, t + 0.002, 0.3, 0.3 * boost)
             mix.add(t + 0.006, citrus_mist(rnd, 0.11), 0.22 * boost, rnd.uniform(-0.3, 0.3))
+        if CUBE:  # the crystal block splits: tight double click
+            cube_click(mix, rnd, t + 0.001, 0.9 * boost, -0.2)
+            cube_click(mix, rnd, t + 0.05, 0.55 * boost, 0.3)
     elif tier == 2:  # cascade of breaks + dense shower
         for k in range(5):
             mix.add(t + rnd.uniform(0.03, 0.3), glass_break(rnd, (1.4, 1.6), 0.08), 0.3 * math.exp(-k / 4.0), rnd.uniform(-0.6, 0.6))
@@ -800,6 +823,9 @@ def glass_impact(mix, t, tier, rnd, boost):
         if CITRUS:
             citrus_zest(mix, rnd, t + 0.004, 0.42, 0.26, 360.0)
             mix.add(t + 0.008, citrus_mist(rnd, 0.08), 0.14, rnd.uniform(-0.4, 0.4))
+        if CUBE:
+            for k in range(3):
+                cube_click(mix, rnd, t + 0.004 + rnd.uniform(0.0, 0.12), 0.5 * math.exp(-k / 2.0), rnd.uniform(-0.6, 0.6))
     else:  # dense noise thump + sparkling glass avalanche
         nb = int(0.3 * SR)
         boom = biquad(noise(nb, rnd), 'lp', 170.0)
@@ -823,6 +849,13 @@ def glass_impact(mix, t, tier, rnd, boost):
                 STATS['marble_ring'] = STATS.get('marble_ring', 0) + 1
                 tau += rnd.expovariate(60.0 * (0.25 + 0.75 * env))
             citrus_zest(mix, rnd, t + 0.01, length * 0.5, 0.12, 300.0)
+        if CUBE:  # ringing scatter of faceted chips on polished marble (resonant pings, stereo, decaying)
+            tau = 0.0
+            while tau < length * 0.85:
+                env = math.exp(-tau / (length * 0.32))
+                mix.add(t + 0.025 + tau, marble_ring(rnd), 0.07 * env * rnd.uniform(0.4, 1.0), rnd.uniform(-0.95, 0.95))
+                STATS['marble_ring'] = STATS.get('marble_ring', 0) + 1
+                tau += rnd.expovariate(75.0 * (0.25 + 0.75 * env))
         i0 = int((t + 0.008) * SR)
         for k in range(min(len(aval[0]), mix.n - i0)):
             mix.L[i0 + k] += aval[0][k]
@@ -837,6 +870,8 @@ def glass_clatter(mix, t, count, inten, rnd, rnd_idx=0):
             mix.add(t + rnd.uniform(0.0, 0.014), glass_grain(rnd, 0.012, 0.026, (1.2, 1.45)), 0.14 + 0.26 * inten, rnd.uniform(-0.7, 0.7))
         if inten > 0.35:
             mix.add(t, glass_break(rnd, (1.45, 1.6), 0.06), 0.18 * inten, rnd.uniform(-0.5, 0.5))
+        if CUBE and inten > 0.2:  # faceted crystal chunk landing on marble: crisp edge click
+            cube_click(mix, rnd, t + 0.002, 0.18 + 0.3 * inten, rnd.uniform(-0.6, 0.6))
     else:  # R4-R5: fine glass scree
         for _ in range(min(2, count)):
             mix.add(t + rnd.uniform(0.0, 0.01), glass_grain(rnd, 0.006, 0.014, (1.3, 1.6)), 0.07 + 0.14 * inten, rnd.uniform(-0.85, 0.85))
@@ -1286,9 +1321,9 @@ def main():
     ap.add_argument('--tail', type=float, default=1.0, help='extra seconds after last event')
     ap.add_argument('--duration', type=float, default=None, help='force total length in seconds')
     ap.add_argument('--seed', type=int, default=7)
-    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass', 'slizzy_juicy_glass', 'slizzy_citrus_glass'], default='obsidian', help='recipe.audioProfile')
+    ap.add_argument('--audio-profile', choices=['obsidian', 'metal_crystal', 'slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass', 'slizzy_juicy_glass', 'slizzy_citrus_glass', 'v4_crystal_cube'], default='obsidian', help='recipe.audioProfile')
     a = ap.parse_args()
-    global PROFILE, OBS, EARTH, ICE, PLASTIC, NUC, GLASS, JUICY, CITRUS
+    global PROFILE, OBS, EARTH, ICE, PLASTIC, NUC, GLASS, JUICY, CITRUS, CUBE
     PROFILE = a.audio_profile
     OBS = PROFILE == 'slizzy_obsidian'
     EARTH = PROFILE == 'slizzy_earth'
@@ -1296,7 +1331,8 @@ def main():
     PLASTIC = PROFILE == 'slizzy_plastic'
     NUC = PROFILE == 'slizzy_nuclear'
     CITRUS = PROFILE == 'slizzy_citrus_glass'
-    JUICY = PROFILE == 'slizzy_juicy_glass' or CITRUS
+    CUBE = PROFILE == 'v4_crystal_cube'
+    JUICY = PROFILE == 'slizzy_juicy_glass' or CITRUS or CUBE
     GLASS = PROFILE == 'slizzy_glass' or JUICY
 
     with open(a.events, encoding='utf-8') as f:
@@ -1306,7 +1342,7 @@ def main():
         BANK[key] = load_sample(key + '.wav')
     print(f'audio profile: {PROFILE}')
     print('samples: ' + ', '.join(f'{k}={"live " + os.path.basename(v["path"]) if v else "synth fallback"}' for k, v in BANK.items()))
-    if PROFILE in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass', 'slizzy_juicy_glass', 'slizzy_citrus_glass'):
+    if PROFILE in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass', 'slizzy_juicy_glass', 'slizzy_citrus_glass', 'v4_crystal_cube'):
         mix, total, pauses = main_v2(events, a)
     else:
         total = a.duration if a.duration else (max((e['time'] for e in events), default=0.0) + a.tail + 0.6)
@@ -1328,7 +1364,7 @@ def main():
         w = windows.get(e['round'])
         return e.get('phase') == 'pour' or (w is not None and w[0] - 0.05 <= e['time'] <= w[1] + POUR_FADE)
 
-    for e in (events if PROFILE not in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass', 'slizzy_juicy_glass', 'slizzy_citrus_glass') else []):
+    for e in (events if PROFILE not in ('slizzy_metal', 'slizzy_obsidian', 'slizzy_earth', 'slizzy_ice', 'slizzy_plastic', 'slizzy_nuclear', 'slizzy_glass', 'slizzy_juicy_glass', 'slizzy_citrus_glass', 'v4_crystal_cube') else []):
         t, ty, inten, tool = e['time'], e['type'], float(e.get('intensity', 1.0)), e.get('tool', '')
         if ty == 'drop':
             voice_drop(mix, t, inten, rnd)

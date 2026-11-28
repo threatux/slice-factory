@@ -389,7 +389,159 @@ def cyclorama(cfg):
     return mat
 
 
+# ---------------------------------------------------------------- crystal rubik's cube (fruit.shape)
+def jewel_tile(name, c, g):
+    """One of the 6 jewel glass tile colours: saturated transmissive surface tint + mild volume absorption.
+    Shadow rays see a Transparent BSDF of the same hue -> soft coloured light on the marble, no black shadow."""
+    mat = _new(name)
+    t = Tree(mat)
+    # tint only where light ENTERS a tile: exits through the opposite (other-coloured) tiles stay clear glass,
+    # otherwise ruby x sapphire filters multiply to black and the cube reads murky
+    geo = t.node("ShaderNodeNewGeometry", -400, 300)
+    tint = t.node("ShaderNodeMix", -200, 250, data_type="RGBA")
+    t.link(geo.outputs["Backfacing"], tint.inputs["Factor"])
+    tint.inputs[6].default_value = hex_rgba(c.get("base", c["hex"]))
+    tint.inputs[7].default_value = hex_rgba(g.get("inner", "#ffffff"))
+    p = t.principled(**{
+        "Base Color": tint.outputs[2], "Transmission Weight": 1.0, "IOR": g["ior"],
+        "Roughness": c.get("roughness", g["roughness"]), "Coat Weight": g["coat"], "Coat Roughness": 0.02,
+    })
+    _shadow_tint(t, p.outputs[0], c["shadow"])
+    _absorption(t, c["hex"], g["absorption_density"] * c.get("density_k", 1.0))
+    _homogeneous(mat)
+    return mat
+
+
+def obsidian_frame(cfg):
+    """Dark smoky obsidian glass of the grooves / cube skeleton (shadow rays: smoky grey, never pitch black)."""
+    mat = _new("ObsidianFrame")
+    t = Tree(mat)
+    p = t.principled(**{
+        "Base Color": hex_rgba(cfg["base"]), "Transmission Weight": cfg["transmission"], "IOR": cfg["ior"],
+        "Roughness": cfg["roughness"], "Coat Weight": 1.0, "Coat Roughness": 0.02,
+    })
+    _shadow_tint(t, p.outputs[0], cfg["shadow"])
+    _absorption(t, cfg["hex"], cfg["absorption_density"])
+    _homogeneous(mat)
+    return mat
+
+
+def rubiks_core(cfg, fruit):
+    """crystal-rubiks-core cut face: clear smoky-quartz glass (Coat 1.0) with a soft glow of the nearest tile's
+    colour toward the cube surface. Tile colours come from an 18x3 lookup texture (face*3+iu, iw) indexed by the
+    pre-cut 'rest_pos', so the glow matches the exact scrambled tile above every cap edge. No stripes."""
+    from .rubiks import tile_lookup_pixels
+    mat = _new("RubiksCore")
+    t = Tree(mat)
+    img = bpy.data.images.get("RubiksTileLUT") or bpy.data.images.new("RubiksTileLUT", 18, 3, alpha=True,
+                                                                         float_buffer=True)
+    img.pixels = tile_lookup_pixels(fruit)
+    S = fruit["size"]
+    h, a = S / 2, S / 3
+    zc = h + fruit["tile_dome"]
+    attr = t.node("ShaderNodeAttribute", -1800, 0, attribute_name="rest_pos")
+    sep = t.node("ShaderNodeSeparateXYZ", -1600, 0)
+    t.link(attr.outputs["Vector"], sep.inputs[0])
+    q = [sep.outputs["X"], sep.outputs["Y"], t.math("SUBTRACT", sep.outputs["Z"], zc, -1450, -100)]
+    other = ((1, 2), (0, 2), (0, 1))
+    wsum, edge, acc = None, None, None
+    for ax in range(3):
+        y = 600 - 450 * ax
+        dist = t.math("SUBTRACT", h, t.math("ABSOLUTE", q[ax], None, -1300, y), -1150, y)
+        mr = t.node("ShaderNodeMapRange", -1000, y, interpolation_type="SMOOTHSTEP")
+        t.link(dist, mr.inputs["Value"])
+        mr.inputs["From Min"].default_value, mr.inputs["From Max"].default_value = 0.0, cfg["glow_falloff"]
+        mr.inputs["To Min"].default_value, mr.inputs["To Max"].default_value = 1.0, 0.0
+        wgt = mr.outputs["Result"]
+        face = t.math("ADD", t.math("GREATER_THAN", q[ax], 0.0, -1150, y - 120), 2.0 * ax, -1000, y - 120)
+        tu, tw = [t.math("MAXIMUM", t.math("MINIMUM", t.math("DIVIDE", t.math("ADD", q[o], h, -1300, y - 240 - 60 * k),
+                                                                           a, -1150, y - 240 - 60 * k),
+                                              2.999, -1000, y - 240 - 60 * k), 0.0, -850, y - 240 - 60 * k)
+                  for k, o in enumerate(other[ax])]
+        U = t.math("DIVIDE", t.math("ADD", t.math("MULTIPLY", face, 3.0, -850, y - 120), tu, -700, y - 120), 18.0,
+                   -550, y - 120)
+        V = t.math("DIVIDE", tw, 3.0, -700, y - 240)
+        uv = t.node("ShaderNodeCombineXYZ", -400, y - 150)
+        t.link(U, uv.inputs["X"])
+        t.link(V, uv.inputs["Y"])
+        tex = t.node("ShaderNodeTexImage", -250, y - 150, interpolation="Closest", extension="EXTEND")
+        tex.image = img
+        t.link(uv.outputs[0], tex.inputs["Vector"])
+        sc = t.node("ShaderNodeVectorMath", -20, y, operation="SCALE")
+        t.link(tex.outputs["Color"], sc.inputs[0])
+        t.link(wgt, sc.inputs["Scale"])
+        if acc is None:
+            acc, wsum, edge = sc.outputs[0], wgt, wgt
+        else:
+            ad = t.node("ShaderNodeVectorMath", 120, y, operation="ADD")
+            t.link(acc, ad.inputs[0])
+            t.link(sc.outputs[0], ad.inputs[1])
+            acc = ad.outputs[0]
+            wsum = t.math("ADD", wsum, wgt, 120, y - 200)
+            edge = t.math("MAXIMUM", edge, wgt, 120, y - 300)
+    inv = t.math("DIVIDE", 1.0, t.math("MAXIMUM", wsum, 1e-3, 260, -400), 400, -400)
+    avg = t.node("ShaderNodeVectorMath", 420, -150, operation="SCALE")
+    t.link(acc, avg.inputs[0])
+    t.link(inv, avg.inputs["Scale"])
+    tint = t.node("ShaderNodeMix", 600, 200, data_type="RGBA")
+    t.link(t.math("MULTIPLY", edge, cfg["glow_strength"], 450, 250), tint.inputs["Factor"])
+    tint.inputs[6].default_value = hex_rgba(cfg["glass_tint"])
+    t.link(avg.outputs[0], tint.inputs[7])
+    p = t.principled(x=800, y=0, **{
+        "Base Color": tint.outputs[2], "Transmission Weight": 1.0, "IOR": cfg["ior"],
+        "Roughness": cfg["roughness"], "Coat Weight": cfg["coat"], "Coat Roughness": 0.02,
+        "Emission Color": avg.outputs[0], "Emission Strength": t.math("MULTIPLY", edge, cfg["glow_emission"], 600, -300),
+    })
+    _shadow_tint(t, p.outputs[0], cfg["shadow"], 1100, 0)
+    _absorption(t, cfg["absorption"], cfg["absorption_density"], 1100, -400)
+    _homogeneous(mat)
+    return mat
+
+
+def build_rubiks(recipe):
+    """Material set for fruit.shape == 'crystal-rubiks-cube' (coreStyle 'crystal-rubiks-core')."""
+    m = recipe["materials"]
+    s = recipe["studio"]
+    fr = recipe["fruit"]
+    g = m["tile_glass"]
+    out = {
+        "CutLine": cut_line(m["cut_line"]),
+        "Gold24K": gold_24k(m["gold"]),
+        "DamascusBlade": damascus_blade(m["damascus"]),
+        "SteelPolish": steel_polish(m["steel"]),
+        "HandleWood": handle_wood(m["handle"]),
+        "Marble": marble(s["board"]),
+        "Cyclorama": cyclorama(s["cyclorama"]),
+        "ObsidianFrame": obsidian_frame(m["obsidian"]),
+    }
+    palette = []
+    sh = m["shards"]
+    for c in fr["palette"]:
+        out[f"Tile_{c['name']}"] = jewel_tile(f"Tile_{c['name']}", c, g)
+        sm = shard_glass({"shard_tint": c.get("shard", c["hex"]), "ior": g["ior"], "roughness": g["roughness"],
+                          "coat": g["coat"], "shadow_tint": c["shadow"], "color": c["hex"],
+                          "shard_density": sh["density"] * c.get("density_k", 1.0)}, f"Shard_{c['name']}")
+        out[sm.name] = sm
+        palette.append((sm, (1.0 - sh["obsidian"]) / len(fr["palette"]), "glass"))
+    ob = m["obsidian"]
+    so = shard_glass({"shard_tint": ob["shard"], "ior": ob["ior"], "roughness": ob["roughness"], "coat": 1.0,
+                      "shadow_tint": ob["shadow"], "color": ob["hex"], "shard_density": ob["shard_density"]},
+                     "Shard_obsidian")
+    out[so.name] = so
+    palette.append((so, sh["obsidian"], "obsidian"))
+    if fr.get("coreStyle", "crystal-rubiks-core") != "crystal-rubiks-core":
+        raise ValueError(f"unknown coreStyle {fr.get('coreStyle')}")
+    out["RubiksCore"] = rubiks_core(m["core"], fr)
+    # cutter / timeline hooks: every surface material caps to the core; R4-R5 shard palette
+    out["_cap_from"] = [out[f"Tile_{c['name']}"] for c in fr["palette"]] + [out["ObsidianFrame"]]
+    out["_cap_to"] = out["RubiksCore"]
+    out["_shard_palette"] = palette
+    return out
+
+
 def build_all(recipe):
+    if recipe.get("fruit", {}).get("shape") == "crystal-rubiks-cube":
+        return build_rubiks(recipe)
     m = recipe["materials"]
     s = recipe["studio"]
     return {

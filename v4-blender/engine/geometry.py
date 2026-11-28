@@ -230,11 +230,11 @@ def _store_rest_pos(obj):
     attr.data.foreach_set("vector", co)
 
 
-def build_gold(name, size, mats, collection=None, location=(0, 0, 0), rotation=(0, 0, 0)):
-    """24K gold teardrop seed (tip toward +Z)."""
+def build_gold(name, size, mats, collection=None, location=(0, 0, 0), rotation=(0, 0, 0), shape="teardrop"):
+    """24K gold teardrop seed (tip toward +Z), or a smooth polished sphere (shape='sphere', radius size[0])."""
     bm = bmesh.new()
-    _ellipsoid(bm, Matrix.Diagonal((*size, 1.0)), (24, 16))
-    for v in bm.verts:
+    _ellipsoid(bm, Matrix.Diagonal((*size, 1.0)), (48, 32) if shape == "sphere" else (24, 16))
+    for v in (bm.verts if shape != "sphere" else []):
         if v.co.z > 0:
             k = 1.0 - 0.5 * (v.co.z / size[2])
             v.co.x *= k

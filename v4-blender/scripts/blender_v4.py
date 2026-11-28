@@ -58,7 +58,14 @@ def main():
 
     mats = materials.build_all(recipe)
     st = studio.build(recipe, mats)
-    berry = geometry.build_strawberry(recipe, mats, join_gold=False)
+    shape = recipe["fruit"].get("shape", "crystal-strawberry")
+    if shape == "crystal-rubiks-cube":
+        from engine import rubiks
+        berry = rubiks.build_cube(recipe, mats)
+        print(f"[v4] crystal-rubiks-cube: {berry['verts']} verts, {berry['tiles']} tiles, scramble seed "
+              f"{berry['scramble_seed']} (score {berry['scramble_score']}), colours {berry['colour_counts']}", flush=True)
+    else:
+        berry = geometry.build_strawberry(recipe, mats, join_gold=False)
     knife = geometry.build_knife(recipe, mats)
     mb = profiles.get("motion_blur", {"mode": "vector"})
     if mb["mode"] == "vector":
